@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  upload_gateway:
+    build: ./services/upload_gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/upload_gateway:/app
+    restart: always
