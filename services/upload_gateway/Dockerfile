@@ -1,10 +1,10 @@
 # Use official Python image
-FROM python:3.12.1-slim
+FROM python:3.10-slim
 
 # Set workdir
 WORKDIR /app
 
-# Install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

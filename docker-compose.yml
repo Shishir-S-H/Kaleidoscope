@@ -8,3 +8,122 @@ services:
     volumes:
       - ./services/upload_gateway:/app
     restart: always
+    env_file:
+      - ./services/upload_gateway/.env
+    depends_on:
+      - minio
+
+  content_moderation:
+    build: ./services/content_moderation
+    ports:
+      - "8001:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # For non-Swarm mode, you can also add:
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+
+  image_tagger:
+    build: ./services/image_tagger
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./services/image_tagger:/app
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  scene_recognition:
+    build: ./services/scene_recognition
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./services/scene_recognition:/app
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  image_captioning:
+    build: ./services/image_captioning
+    ports:
+      - "8004:8000"
+    volumes:
+      - ./services/image_captioning:/app
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  orchestrator:
+    build: ./services/orchestrator
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./services/orchestrator:/app
+    env_file:
+      - ./services/orchestrator/.env
+    depends_on:
+      - db
+      - content_moderation
+      - image_tagger
+      - scene_recognition
+      - image_captioning
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: kaleido
+      POSTGRES_PASSWORD: strongpass
+      POSTGRES_DB: kaleidoscope
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  pgdata:
+  minio_data:
+  pgadmin_data:
