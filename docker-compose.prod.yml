@@ -1,0 +1,178 @@
+# Production Docker Compose - Cloud Optimized
+# No development volume mounts, uses pre-built images
+
+services:
+  content_moderation:
+    image: ${DOCKER_USERNAME}/kaleidoscope-content-moderation:latest
+    container_name: content_moderation
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  image_tagger:
+    image: ${DOCKER_USERNAME}/kaleidoscope-image-tagger:latest
+    container_name: image_tagger
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  scene_recognition:
+    image: ${DOCKER_USERNAME}/kaleidoscope-scene-recognition:latest
+    container_name: scene_recognition
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  image_captioning:
+    image: ${DOCKER_USERNAME}/kaleidoscope-image-captioning:latest
+    container_name: image_captioning
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  face_recognition:
+    image: ${DOCKER_USERNAME}/kaleidoscope-face-recognition:latest
+    container_name: face_recognition
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  post_aggregator:
+    image: ${DOCKER_USERNAME}/kaleidoscope-post-aggregator:latest
+    container_name: post_aggregator
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      - redis
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  es_sync:
+    image: ${DOCKER_USERNAME}/kaleidoscope-es-sync:latest
+    container_name: es_sync
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - ES_HOST=http://elasticsearch:9200
+    depends_on:
+      - redis
+      - elasticsearch
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - kaleidoscope-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  elasticsearch:
+    image: elasticsearch:8.10.2
+    container_name: elasticsearch
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - kaleidoscope-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+networks:
+  kaleidoscope-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  es-data:

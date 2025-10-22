@@ -1,0 +1,4 @@
+# Root dependencies for helper scripts and development tools
+Faker==22.6.0
+elasticsearch==8.12.0
+pika==1.3.2

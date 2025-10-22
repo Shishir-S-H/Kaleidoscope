@@ -1,0 +1,798 @@
+{
+  "info": {
+    "name": "Kaleidoscope AI - Complete API Tests",
+    "description": "Comprehensive API testing collection for Kaleidoscope AI system including Elasticsearch, Redis Streams, and Docker services",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "ES_HOST",
+      "value": "http://localhost:9200",
+      "type": "string"
+    },
+    {
+      "key": "REDIS_HOST",
+      "value": "localhost:6379",
+      "type": "string"
+    },
+    {
+      "key": "DOCKER_HOST",
+      "value": "http://localhost:2375",
+      "type": "string"
+    },
+    {
+      "key": "TEST_INDEX",
+      "value": "media_search",
+      "type": "string"
+    },
+    {
+      "key": "TEST_DOC_ID",
+      "value": "test_doc_1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Infrastructure Health Checks",
+      "item": [
+        {
+          "name": "1.1 Elasticsearch Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}",
+              "host": ["{{ES_HOST}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Docker Services Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/json",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "json"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Redis Health Check (via Docker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"ping\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Elasticsearch Management",
+      "item": [
+        {
+          "name": "2.1 List All Indices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/_cat/indices?v",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_cat", "indices"],
+              "query": [
+                {
+                  "key": "v",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Get Index Mapping",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_mapping",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_mapping"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Create Test Index",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mappings\": {\n    \"properties\": {\n      \"test_field\": {\"type\": \"text\"},\n      \"created_at\": {\"type\": \"date\"}\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/test_index",
+              "host": ["{{ES_HOST}}"],
+              "path": ["test_index"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.4 Delete Test Index",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/test_index",
+              "host": ["{{ES_HOST}}"],
+              "path": ["test_index"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.5 Cluster Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/_cluster/health",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_cluster", "health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.6 Node Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/_nodes/stats",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_nodes", "stats"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.7 Index Templates",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"index_patterns\": [\"test_*\"],\n  \"template\": {\n    \"mappings\": {\n      \"properties\": {\n        \"test_field\": {\"type\": \"text\"},\n        \"created_at\": {\"type\": \"date\"}\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/_index_template/test_template",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_index_template", "test_template"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.8 Delete Index Template",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/_index_template/test_template",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_index_template", "test_template"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Document Operations",
+      "item": [
+        {
+          "name": "3.1 Index Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"media_id\": 12345,\n  \"post_id\": 100,\n  \"post_title\": \"Test Post - Beach Vacation\",\n  \"ai_caption\": \"Beautiful sunset at the beach with people enjoying the view\",\n  \"ai_tags\": [\"beach\", \"sunset\", \"people\", \"vacation\"],\n  \"ai_scenes\": [\"beach\", \"outdoor\"],\n  \"image_embedding\": [0.1, 0.2, 0.3, 0.4, 0.5],\n  \"is_safe\": true,\n  \"detected_users\": [\n    {\"user_id\": 1, \"username\": \"alice\"},\n    {\"user_id\": 2, \"username\": \"bob\"}\n  ],\n  \"uploader_id\": 1,\n  \"uploader_username\": \"alice\",\n  \"uploader_department\": \"Engineering\",\n  \"reaction_count\": 42,\n  \"comment_count\": 10,\n  \"created_at\": \"2025-10-15T10:00:00Z\",\n  \"updated_at\": \"2025-10-15T10:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_doc/{{TEST_DOC_ID}}",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_doc", "{{TEST_DOC_ID}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Get Document by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_doc/{{TEST_DOC_ID}}",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_doc", "{{TEST_DOC_ID}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Update Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doc\": {\n    \"reaction_count\": 50,\n    \"comment_count\": 12,\n    \"updated_at\": \"2025-10-15T11:00:00Z\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_update/{{TEST_DOC_ID}}",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_update", "{{TEST_DOC_ID}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Delete Document",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_doc/{{TEST_DOC_ID}}",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_doc", "{{TEST_DOC_ID}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Search Operations",
+      "item": [
+        {
+          "name": "4.1 Simple Text Search",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search?q=beach",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "beach"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 Multi-Field Search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"multi_match\": {\n      \"query\": \"beach sunset\",\n      \"fields\": [\"ai_caption\", \"ai_tags\", \"post_title\"]\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Filtered Search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        {\"match\": {\"ai_caption\": \"beach\"}}\n      ],\n      \"filter\": [\n        {\"term\": {\"is_safe\": true}},\n        {\"range\": {\"reaction_count\": {\"gte\": 40}}}\n      ]\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Aggregations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"size\": 0,\n  \"aggs\": {\n    \"popular_tags\": {\n      \"terms\": {\n        \"field\": \"ai_tags\",\n        \"size\": 10\n      }\n    },\n    \"avg_reactions\": {\n      \"avg\": {\n        \"field\": \"reaction_count\"\n      }\n    },\n    \"safe_content\": {\n      \"terms\": {\n        \"field\": \"is_safe\"\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Vector Search (KNN)",
+      "item": [
+        {
+          "name": "5.1 KNN Similarity Search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"knn\": {\n    \"field\": \"image_embedding\",\n    \"query_vector\": [0.1, 0.2, 0.3, 0.4, 0.5],\n    \"k\": 5,\n    \"num_candidates\": 100\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 Hybrid Search (Text + Vector)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"should\": [\n        {\n          \"multi_match\": {\n            \"query\": \"beach sunset\",\n            \"fields\": [\"ai_caption\", \"ai_tags\"]\n          }\n        },\n        {\n          \"knn\": {\n            \"field\": \"image_embedding\",\n            \"query_vector\": [0.1, 0.2, 0.3, 0.4, 0.5],\n            \"k\": 5,\n            \"num_candidates\": 100\n          }\n        }\n      ]\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Redis Streams",
+      "item": [
+        {
+          "name": "6.1 Check Stream Information",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"XINFO\", \"STREAM\", \"post-image-processing\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 List All Streams",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"KEYS\", \"*\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 Add Message to Stream",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"XADD\", \"post-image-processing\", \"*\", \"job_id\", \"test_job_123\", \"post_id\", \"100\", \"media_id\", \"500\", \"image_url\", \"https://example.com/test.jpg\", \"user_id\", \"1\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.4 Read Messages from Stream",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"XREAD\", \"STREAMS\", \"post-image-processing\", \"0\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.5 Create Consumer Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"XGROUP\", \"CREATE\", \"post-image-processing\", \"test-group\", \"0\", \"MKSTREAM\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.6 Read from Consumer Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"AttachStdout\": true,\n  \"AttachStderr\": true,\n  \"Cmd\": [\"redis-cli\", \"XREADGROUP\", \"GROUP\", \"test-group\", \"consumer1\", \"COUNT\", \"1\", \"STREAMS\", \"post-image-processing\", \">\"]\n}"
+            },
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-redis-1/exec",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-redis-1", "exec"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Service Health Checks",
+      "item": [
+        {
+          "name": "7.1 Check Service Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-content_moderation-1/logs?stdout=true&stderr=true&tail=10",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-content_moderation-1", "logs"],
+              "query": [
+                {
+                  "key": "stdout",
+                  "value": "true"
+                },
+                {
+                  "key": "stderr",
+                  "value": "true"
+                },
+                {
+                  "key": "tail",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.2 Check Service Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{DOCKER_HOST}}/containers/kaleidoscope-ai-content_moderation-1/stats",
+              "host": ["{{DOCKER_HOST}}"],
+              "path": ["containers", "kaleidoscope-ai-content_moderation-1", "stats"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Advanced ES Operations",
+      "item": [
+        {
+          "name": "8.1 Bulk Index Operations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-ndjson"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"index\":{\"_index\":\"{{TEST_INDEX}}\",\"_id\":\"bulk_doc_1\"}}\n{\"media_id\":11111,\"post_id\":200,\"ai_caption\":\"Test bulk document 1\",\"ai_tags\":[\"test\",\"bulk\"],\"is_safe\":true}\n{\"index\":{\"_index\":\"{{TEST_INDEX}}\",\"_id\":\"bulk_doc_2\"}}\n{\"media_id\":22222,\"post_id\":201,\"ai_caption\":\"Test bulk document 2\",\"ai_tags\":[\"test\",\"bulk\"],\"is_safe\":true}\n{\"delete\":{\"_index\":\"{{TEST_INDEX}}\",\"_id\":\"bulk_doc_1\"}}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/_bulk",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_bulk"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.2 Multi-Index Search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"match_all\": {}\n  },\n  \"size\": 10\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/media_search,post_search/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["media_search,post_search", "_search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.3 Search with Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"match_all\": {}\n  },\n  \"size\": 100,\n  \"profile\": true\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_search",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_search"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.4 Index Performance Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-ndjson"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"index\":{\"_index\":\"{{TEST_INDEX}}\"}}\n{\"media_id\":1,\"ai_caption\":\"Performance test document 1\",\"ai_tags\":[\"test\",\"performance\"]}\n{\"index\":{\"_index\":\"{{TEST_INDEX}}\"}}\n{\"media_id\":2,\"ai_caption\":\"Performance test document 2\",\"ai_tags\":[\"test\",\"performance\"]}\n{\"index\":{\"_index\":\"{{TEST_INDEX}}\"}}\n{\"media_id\":3,\"ai_caption\":\"Performance test document 3\",\"ai_tags\":[\"test\",\"performance\"]}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/_bulk",
+              "host": ["{{ES_HOST}}"],
+              "path": ["_bulk"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.5 Clear Test Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": {\n    \"match_all\": {}\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ES_HOST}}/{{TEST_INDEX}}/_delete_by_query",
+              "host": ["{{ES_HOST}}"],
+              "path": ["{{TEST_INDEX}}", "_delete_by_query"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

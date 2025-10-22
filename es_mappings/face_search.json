@@ -1,0 +1,60 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 2,
+      "number_of_replicas": 1
+    }
+  },
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "long"
+      },
+      "face_id": {
+        "type": "keyword"
+      },
+      "media_id": {
+        "type": "long"
+      },
+      "post_id": {
+        "type": "long"
+      },
+      "face_embedding": {
+        "type": "dense_vector",
+        "dims": 1024,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "bbox": {
+        "type": "integer"
+      },
+      "identified_user_id": {
+        "type": "long"
+      },
+      "identified_username": {
+        "type": "keyword"
+      },
+      "match_confidence": {
+        "type": "float"
+      },
+      "uploader_id": {
+        "type": "long"
+      },
+      "post_title": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "media_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "created_at": {
+        "type": "date"
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "analysis": {
+        "analyzer": {
+          "standard_lowercase": {
+            "type": "standard",
+            "stopwords": "_english_"
+          }
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "user_id": {
+        "type": "long"
+      },
+      "username": {
+        "type": "keyword"
+      },
+      "full_name": {
+        "type": "text",
+        "analyzer": "standard_lowercase",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "department": {
+        "type": "keyword"
+      },
+      "bio": {
+        "type": "text",
+        "analyzer": "standard_lowercase"
+      },
+      "total_posts": {
+        "type": "integer"
+      },
+      "total_followers": {
+        "type": "integer"
+      },
+      "face_enrolled": {
+        "type": "boolean"
+      },
+      "joined_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
+    }
+  }
+}

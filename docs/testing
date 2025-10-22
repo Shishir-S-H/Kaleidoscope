@@ -1,0 +1,2847 @@
+# Manual Testing Guide - Step by Step
+
+**Kaleidoscope AI - Complete Manual Testing Documentation**
+
+This guide provides detailed, step-by-step instructions for manually testing both the **WRITE PATH** (image processing pipeline) and **READ PATH** (search functionality) of the Kaleidoscope AI system.
+
+---
+
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Environment Setup](#environment-setup)
+3. [Write Path Testing](#write-path-testing)
+4. [Read Path Testing](#read-path-testing)
+5. [API Testing with Postman & curl](#api-testing-with-postman--curl)
+6. [Redis Streams Testing](#redis-streams-testing)
+7. [Elasticsearch API Testing](#elasticsearch-api-testing)
+8. [Advanced Testing](#advanced-testing)
+9. [Troubleshooting](#troubleshooting)
+10. [Test Data Reference](#test-data-reference)
+
+---
+
+## Prerequisites
+
+### Required Software
+
+- Docker Desktop (running)
+- Python 3.8+ (for test scripts)
+- **Postman** (for API testing) - [Download here](https://www.postman.com/downloads/)
+- curl or PowerShell (for command-line API testing)
+- Redis CLI (optional, for direct stream inspection)
+
+### Testing Tools Provided
+
+- **Postman Collection**: `Kaleidoscope_AI_API_Tests.postman_collection.json` (36 comprehensive tests)
+- **curl Commands Reference**: `CURL_COMMANDS_REFERENCE.md` (Complete command reference)
+- **Automated Test Scripts**:
+  - `run_comprehensive_tests.sh` (Linux/Mac)
+  - `run_comprehensive_tests.bat` (Windows)
+
+### Required Python Packages
+
+```bash
+pip install redis requests elasticsearch
+```
+
+### System Requirements
+
+- **RAM**: At least 4GB free
+- **Disk**: At least 2GB free
+- **Network**: Internet connection (for HuggingFace API)
+
+---
+
+## Quick Start Testing
+
+### Option 1: Automated Testing (Recommended)
+
+**Windows:**
+
+```cmd
+# Run complete test suite
+run_comprehensive_tests.bat
+
+# Or run specific phases
+run_comprehensive_tests.bat start    # Start services only
+run_comprehensive_tests.bat test     # Run tests only
+run_comprehensive_tests.bat cleanup  # Cleanup test data
+run_comprehensive_tests.bat stop     # Stop services
+```
+
+**Linux/Mac:**
+
+```bash
+# Run complete test suite
+./run_comprehensive_tests.sh
+
+# Or run specific phases
+./run_comprehensive_tests.sh start    # Start services only
+./run_comprehensive_tests.sh test     # Run tests only
+./run_comprehensive_tests.sh cleanup  # Cleanup test data
+./run_comprehensive_tests.sh stop     # Stop services
+```
+
+### Option 2: Postman Testing
+
+1. **Import Collection**: Import `Kaleidoscope_AI_API_Tests.postman_collection.json`
+2. **Set Environment**: Create environment with variables from the collection
+3. **Run Tests**: Execute collection or individual requests
+
+### Option 3: Manual curl Testing
+
+1. **Follow Commands**: Use `CURL_COMMANDS_REFERENCE.md`
+2. **Copy & Paste**: Execute commands one by one
+3. **Verify Results**: Check responses match expected output
+
+---
+
+## Environment Setup
+
+### Step 1: Start the System
+
+Open PowerShell/Terminal and navigate to the project directory:
+
+```powershell
+cd C:\Legion\Micorservice
+```
+
+### Step 2: Start All Services
+
+```powershell
+docker compose up -d
+```
+
+**Expected Output**:
+
+```
+ Container kaleidoscope-ai-redis-1  Running
+ Container kaleidoscope-ai-elasticsearch-1  Running
+ Container kaleidoscope-ai-content_moderation-1  Running
+ Container kaleidoscope-ai-image_tagger-1  Running
+ Container kaleidoscope-ai-scene_recognition-1  Running
+ Container kaleidoscope-ai-image_captioning-1  Running
+ Container kaleidoscope-ai-face_recognition-1  Running
+ Container kaleidoscope-ai-post_aggregator-1  Running
+ Container kaleidoscope-ai-es_sync-1  Running
+```
+
+**Verification**:
+
+```powershell
+docker compose ps
+```
+
+All services should show status `running`.
+
+### Step 3: Verify Infrastructure
+
+#### Test Redis:
+
+```powershell
+docker exec -it kaleidoscope-ai-redis-1 redis-cli ping
+```
+
+**Expected**: `PONG`
+
+#### Test Elasticsearch:
+
+```powershell
+curl http://localhost:9200
+```
+
+**Expected**: JSON response with Elasticsearch version info
+
+#### Check Elasticsearch Indices:
+
+```powershell
+curl http://localhost:9200/_cat/indices?v
+```
+
+**Expected**: List of 7 indices (media_search, post_search, etc.)
+
+---
+
+## Write Path Testing
+
+The write path tests the complete flow from image upload to Elasticsearch indexing:
+
+```
+Image Job → AI Services → Post Aggregator → ES Sync → Elasticsearch
+```
+
+### Test 1: Publish Image Processing Job
+
+#### Step 1.1: Create Test Script
+
+Create a file `test_publish_job.py`:
+
+```python
+import redis
+import json
+import time
+
+# Configuration
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+STREAM_NAME = "post-image-processing"
+
+# Test data
+job = {
+    "job_id": f"manual_test_{int(time.time())}",
+    "post_id": "99999",
+    "media_id": "88888",
+    "image_url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e",
+    "user_id": "1"
+}
+
+# Connect to Redis
+print("Connecting to Redis...")
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+# Publish job
+print(f"Publishing job to {STREAM_NAME}...")
+message_id = r.xadd(STREAM_NAME, job)
+
+print(f"✓ Job published successfully!")
+print(f"  Message ID: {message_id}")
+print(f"  Job ID: {job['job_id']}")
+print(f"  Image URL: {job['image_url']}")
+print()
+print("Next steps:")
+print("1. Check AI service logs: docker compose logs -f content_moderation")
+print("2. Wait 10-30 seconds for processing")
+print("3. Check results in ml-insights-results stream")
+```
+
+#### Step 1.2: Run the Script
+
+```powershell
+python test_publish_job.py
+```
+
+**Expected Output**:
+
+```
+Connecting to Redis...
+Publishing job to post-image-processing...
+✓ Job published successfully!
+  Message ID: 1760538114772-0
+  Job ID: manual_test_1760538114
+  Image URL: https://images.unsplash.com/photo-1507525428034-b723cf961d3e
+
+Next steps:
+1. Check AI service logs: docker compose logs -f content_moderation
+2. Wait 10-30 seconds for processing
+3. Check results in ml-insights-results stream
+```
+
+### Test 2: Monitor AI Services
+
+#### Step 2.1: Watch Content Moderation Service
+
+```powershell
+docker compose logs -f content_moderation
+```
+
+**Expected Output** (within 30 seconds):
+
+```json
+{
+  "timestamp": "2025-10-15T...",
+  "level": "INFO",
+  "message": "Received job",
+  "job_id": "manual_test_...",
+  "image_url": "https://images.unsplash.com/..."
+}
+...
+{
+  "level": "INFO",
+  "message": "Job completed",
+  "is_safe": true,
+  "confidence": 0.95
+}
+```
+
+Press `Ctrl+C` to stop following logs.
+
+#### Step 2.2: Watch Other AI Services
+
+Repeat for other services:
+
+```powershell
+docker compose logs -f image_tagger
+docker compose logs -f scene_recognition
+docker compose logs -f image_captioning
+docker compose logs -f face_recognition
+```
+
+Each service should show similar processing logs.
+
+### Test 3: Check ML Results
+
+#### Step 3.1: Create Stream Reader Script
+
+Create `check_ml_results.py`:
+
+```python
+import redis
+import json
+
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+print("Reading ml-insights-results stream...")
+print("=" * 70)
+
+# Read last 10 messages
+messages = r.xrevrange("ml-insights-results", count=10)
+
+if not messages:
+    print("No messages found. AI services may still be processing.")
+    print("Wait 30 seconds and try again.")
+else:
+    print(f"Found {len(messages)} recent messages:\n")
+
+    for msg_id, data in messages:
+        print(f"Message ID: {msg_id}")
+        print(f"  Job ID: {data.get('job_id', 'N/A')}")
+        print(f"  Post ID: {data.get('post_id', 'N/A')}")
+        print(f"  Media ID: {data.get('media_id', 'N/A')}")
+        print(f"  Service: {data.get('service_type', 'N/A')}")
+
+        if 'result' in data:
+            try:
+                result = json.loads(data['result'])
+                print(f"  Result:")
+                for key, value in list(result.items())[:5]:
+                    print(f"    {key}: {value}")
+            except:
+                print(f"  Result: {data['result'][:100]}...")
+
+        print()
+```
+
+#### Step 3.2: Run the Script
+
+```powershell
+python check_ml_results.py
+```
+
+**Expected Output**:
+
+```
+Reading ml-insights-results stream...
+======================================================================
+Found 5 recent messages:
+
+Message ID: 1760538144772-0
+  Job ID: manual_test_1760538114
+  Post ID: 99999
+  Media ID: 88888
+  Service: content_moderation
+  Result:
+    is_safe: True
+    moderation_confidence: 0.95
+    ...
+
+Message ID: 1760538145123-0
+  Job ID: manual_test_1760538114
+  Post ID: 99999
+  Media ID: 88888
+  Service: image_tagger
+  Result:
+    tags: ['beach', 'sunset', 'ocean']
+    ...
+```
+
+### Test 4: Check Post Aggregator
+
+#### Step 4.1: Create Aggregator Check Script
+
+Create `check_aggregator.py`:
+
+```python
+import redis
+import json
+
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+print("Reading post-insights-enriched stream...")
+print("=" * 70)
+
+messages = r.xrevrange("post-insights-enriched", count=5)
+
+if not messages:
+    print("No enriched posts found.")
+    print("Post aggregator may need more images to aggregate.")
+else:
+    print(f"Found {len(messages)} enriched post(s):\n")
+
+    for msg_id, data in messages:
+        print(f"Message ID: {msg_id}")
+        print(f"  Post ID: {data.get('post_id', 'N/A')}")
+        print(f"  Event Type: {data.get('event_type', 'N/A')}")
+        print(f"  Media Count: {data.get('media_count', 'N/A')}")
+        print(f"  Total Faces: {data.get('total_faces', 'N/A')}")
+        print(f"  Is Safe: {data.get('is_safe', 'N/A')}")
+
+        if 'aggregated_tags' in data:
+            tags = json.loads(data['aggregated_tags'])
+            print(f"  Tags: {', '.join(tags[:5])}")
+
+        print()
+```
+
+#### Step 4.2: Run the Script
+
+```powershell
+python check_aggregator.py
+```
+
+**Expected Output**:
+
+```
+Reading post-insights-enriched stream...
+======================================================================
+Found 1 enriched post(s):
+
+Message ID: 1760538180000-0
+  Post ID: 99999
+  Event Type: beach_party
+  Media Count: 1
+  Total Faces: 2
+  Is Safe: True
+  Tags: beach, sunset, ocean, outdoor, water
+```
+
+### Test 5: Test ES Sync Service
+
+#### Step 5.1: Create ES Sync Test Script
+
+Create `test_es_sync.py`:
+
+```python
+import redis
+import requests
+import json
+import time
+
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+# Create test document
+doc = {
+    "media_id": 77777,
+    "post_id": 99999,
+    "post_title": "Manual Test - Beach Scene",
+    "post_all_tags": ["test", "beach", "manual"],
+    "media_url": "https://example.com/test.jpg",
+    "ai_caption": "A beautiful beach scene for testing",
+    "ai_tags": ["beach", "ocean", "test"],
+    "ai_scenes": ["beach", "outdoor"],
+    "image_embedding": [0.1] * 512,
+    "is_safe": True,
+    "detected_users": [],
+    "uploader_id": 1,
+    "uploader_username": "test_user",
+    "uploader_department": "Engineering",
+    "reaction_count": 0,
+    "comment_count": 0,
+    "created_at": "2025-10-15T12:00:00Z",
+    "updated_at": "2025-10-15T12:00:00Z"
+}
+
+# Publish to ES sync queue
+message = {
+    "operation": "index",
+    "indexType": "media_search",
+    "documentId": "manual_test_77777",
+    "documentData": json.dumps(doc)
+}
+
+print("Publishing to es-sync-queue...")
+msg_id = r.xadd("es-sync-queue", message)
+print(f"✓ Published: {msg_id}")
+
+print("\nWaiting 3 seconds for ES Sync...")
+time.sleep(3)
+
+# Check in Elasticsearch
+print("Checking Elasticsearch...")
+response = requests.get("http://localhost:9200/media_search/_doc/manual_test_77777")
+
+if response.status_code == 200:
+    print("✓ Document found in Elasticsearch!")
+    doc_data = response.json()
+    print(f"\n  Document ID: {doc_data['_id']}")
+    print(f"  Media ID: {doc_data['_source']['media_id']}")
+    print(f"  Caption: {doc_data['_source']['ai_caption']}")
+    print(f"  Tags: {', '.join(doc_data['_source']['ai_tags'])}")
+else:
+    print(f"✗ Document not found (status: {response.status_code})")
+    print("Check ES Sync logs: docker compose logs es_sync")
+```
+
+#### Step 5.2: Run the Script
+
+```powershell
+python test_es_sync.py
+```
+
+**Expected Output**:
+
+```
+Publishing to es-sync-queue...
+✓ Published: 1760538200000-0
+
+Waiting 3 seconds for ES Sync...
+Checking Elasticsearch...
+✓ Document found in Elasticsearch!
+
+  Document ID: manual_test_77777
+  Media ID: 77777
+  Caption: A beautiful beach scene for testing
+  Tags: beach, ocean, test
+```
+
+### Test 6: Verify in Elasticsearch
+
+#### Step 6.1: Check ES Sync Logs
+
+```powershell
+docker compose logs es_sync --tail=20
+```
+
+**Expected**: Messages showing successful indexing
+
+#### Step 6.2: Verify Document Count
+
+```powershell
+curl "http://localhost:9200/media_search/_count"
+```
+
+**Expected Output**:
+
+```json
+{
+  "count": 3,
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "skipped": 0,
+    "failed": 0
+  }
+}
+```
+
+---
+
+## Read Path Testing
+
+The read path tests search functionality in Elasticsearch:
+
+```
+Search Query → Elasticsearch → Results → User
+```
+
+### Test 1: Simple Text Search
+
+#### Step 1.1: Search for "beach"
+
+```powershell
+curl "http://localhost:9200/media_search/_search?q=beach"
+```
+
+**Expected Output**:
+
+```json
+{
+  "took": 44,
+  "timed_out": false,
+  "_shards": {...},
+  "hits": {
+    "total": {"value": 2, "relation": "eq"},
+    "max_score": 0.395,
+    "hits": [
+      {
+        "_index": "media_search",
+        "_id": "manual_test_77777",
+        "_score": 0.395,
+        "_source": {
+          "media_id": 77777,
+          "ai_caption": "A beautiful beach scene...",
+          "ai_tags": ["beach", "ocean"],
+          ...
+        }
+      }
+    ]
+  }
+}
+```
+
+#### Step 1.2: PowerShell Alternative
+
+```powershell
+$response = Invoke-WebRequest -Uri "http://localhost:9200/media_search/_search?q=beach" -UseBasicParsing
+$response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
+```
+
+### Test 2: Advanced Query (Multi-Match)
+
+#### Step 2.1: Create Search Test Script
+
+Create `test_search.py`:
+
+```python
+import requests
+import json
+
+ES_HOST = "http://localhost:9200"
+
+def test_multifield_search():
+    """Test multi-field search."""
+    print("TEST: Multi-field Search")
+    print("=" * 70)
+
+    query = {
+        "query": {
+            "multi_match": {
+                "query": "beach sunset",
+                "fields": ["ai_caption", "ai_tags", "post_title"]
+            }
+        }
+    }
+
+    response = requests.post(
+        f"{ES_HOST}/media_search/_search",
+        json=query,
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code == 200:
+        results = response.json()
+        print(f"✓ Search successful")
+        print(f"  Found: {results['hits']['total']['value']} documents")
+        print(f"  Time: {results['took']}ms")
+        print()
+
+        for i, hit in enumerate(results['hits']['hits'][:3], 1):
+            print(f"  Result {i}:")
+            print(f"    ID: {hit['_id']}")
+            print(f"    Score: {hit['_score']}")
+            print(f"    Caption: {hit['_source'].get('ai_caption', 'N/A')[:60]}...")
+            print()
+    else:
+        print(f"✗ Search failed: {response.status_code}")
+
+def test_filtered_search():
+    """Test filtered search (safe content only)."""
+    print("\nTEST: Filtered Search (safe content)")
+    print("=" * 70)
+
+    query = {
+        "query": {
+            "bool": {
+                "must": [
+                    {"match": {"ai_caption": "beach"}}
+                ],
+                "filter": [
+                    {"term": {"is_safe": True}}
+                ]
+            }
+        }
+    }
+
+    response = requests.post(
+        f"{ES_HOST}/media_search/_search",
+        json=query,
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code == 200:
+        results = response.json()
+        print(f"✓ Filtered search successful")
+        print(f"  Found: {results['hits']['total']['value']} safe documents")
+        print(f"  Time: {results['took']}ms")
+    else:
+        print(f"✗ Search failed: {response.status_code}")
+
+def test_aggregations():
+    """Test aggregations (tag distribution)."""
+    print("\nTEST: Aggregations (Popular Tags)")
+    print("=" * 70)
+
+    query = {
+        "size": 0,
+        "aggs": {
+            "popular_tags": {
+                "terms": {
+                    "field": "ai_tags",
+                    "size": 10
+                }
+            }
+        }
+    }
+
+    response = requests.post(
+        f"{ES_HOST}/media_search/_search",
+        json=query,
+        headers={"Content-Type": "application/json"}
+    )
+
+    if response.status_code == 200:
+        results = response.json()
+        buckets = results['aggregations']['popular_tags']['buckets']
+
+        print(f"✓ Aggregation successful")
+        print(f"  Found {len(buckets)} unique tags:")
+        print()
+
+        for bucket in buckets:
+            print(f"    {bucket['key']}: {bucket['doc_count']} documents")
+    else:
+        print(f"✗ Aggregation failed: {response.status_code}")
+
+if __name__ == "__main__":
+    test_multifield_search()
+    test_filtered_search()
+    test_aggregations()
+
+    print("\n" + "=" * 70)
+    print("All search tests completed!")
+```
+
+#### Step 2.2: Run Search Tests
+
+```powershell
+python test_search.py
+```
+
+**Expected Output**:
+
+```
+TEST: Multi-field Search
+======================================================================
+✓ Search successful
+  Found: 2 documents
+  Time: 44ms
+
+  Result 1:
+    ID: manual_test_77777
+    Score: 0.82
+    Caption: A beautiful beach scene for testing...
+
+
+TEST: Filtered Search (safe content)
+======================================================================
+✓ Filtered search successful
+  Found: 2 safe documents
+  Time: 38ms
+
+TEST: Aggregations (Popular Tags)
+======================================================================
+✓ Aggregation successful
+  Found 5 unique tags:
+
+    beach: 2 documents
+    ocean: 2 documents
+    test: 2 documents
+    ...
+
+======================================================================
+All search tests completed!
+```
+
+### Test 3: Search Other Indices
+
+#### Step 3.1: Search Post Index
+
+```powershell
+curl "http://localhost:9200/post_search/_search?q=team"
+```
+
+#### Step 3.2: Search User Index
+
+```powershell
+curl "http://localhost:9200/user_search/_search?q=engineering"
+```
+
+### Test 4: Performance Testing
+
+#### Step 4.1: Create Performance Test Script
+
+Create `test_performance.py`:
+
+```python
+import requests
+import time
+import statistics
+
+ES_HOST = "http://localhost:9200"
+
+print("Testing search performance...")
+print("=" * 70)
+
+search_times = []
+
+for i in range(20):
+    start = time.time()
+    response = requests.get(f"{ES_HOST}/media_search/_search?q=beach")
+    elapsed = (time.time() - start) * 1000  # ms
+    search_times.append(elapsed)
+
+    if (i + 1) % 5 == 0:
+        print(f"  Completed {i + 1}/20 searches...")
+
+print()
+print("Performance Results:")
+print(f"  Average: {statistics.mean(search_times):.2f}ms")
+print(f"  Median: {statistics.median(search_times):.2f}ms")
+print(f"  Min: {min(search_times):.2f}ms")
+print(f"  Max: {max(search_times):.2f}ms")
+print(f"  Std Dev: {statistics.stdev(search_times):.2f}ms")
+
+if statistics.mean(search_times) < 100:
+    print("\n✓ Performance: Excellent (< 100ms)")
+elif statistics.mean(search_times) < 500:
+    print("\n✓ Performance: Good (< 500ms)")
+else:
+    print("\n⚠ Performance: Needs optimization (> 500ms)")
+```
+
+#### Step 4.2: Run Performance Test
+
+```powershell
+python test_performance.py
+```
+
+---
+
+## API Testing with Postman & curl
+
+This section provides comprehensive API testing using both Postman (GUI) and curl (command-line) to verify every aspect of the system.
+
+### Postman Collection Setup
+
+#### Import Postman Collection
+
+1. **Download Collection**: Save the provided Postman collection JSON file
+2. **Import to Postman**:
+   - Open Postman
+   - Click "Import" button
+   - Select the collection JSON file
+   - Click "Import"
+
+#### Environment Variables
+
+Create a Postman environment with these variables:
+
+| Variable      | Value                   | Description        |
+| ------------- | ----------------------- | ------------------ |
+| `ES_HOST`     | `http://localhost:9200` | Elasticsearch host |
+| `REDIS_HOST`  | `localhost:6379`        | Redis host         |
+| `DOCKER_HOST` | `http://localhost:2375` | Docker API host    |
+| `TEST_INDEX`  | `media_search`          | Test index name    |
+| `TEST_DOC_ID` | `test_doc_1`            | Test document ID   |
+
+#### Collection Structure
+
+The Postman collection includes:
+
+- **Infrastructure Tests** (3 requests)
+- **Elasticsearch Management** (8 requests)
+- **Document Operations** (4 requests)
+- **Search Operations** (4 requests)
+- **Vector Search** (2 requests)
+- **Redis Streams** (6 requests)
+- **Service Health** (2 requests)
+- **Advanced ES Operations** (5 requests)
+- **Performance Tests** (2 requests)
+
+**Total**: 36 comprehensive API tests
+
+### Test 1: Infrastructure Health Checks
+
+#### 1.1: Redis Health Check
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:6379`
+- **Note**: Redis doesn't have HTTP API, use Redis CLI instead
+
+**curl Command:**
+
+```bash
+# Redis doesn't support HTTP, use Redis CLI
+docker exec -it kaleidoscope-ai-redis-1 redis-cli ping
+```
+
+**Expected Response:**
+
+```
+PONG
+```
+
+**Postman Alternative (Redis CLI via Docker):**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": ["redis-cli", "ping"]
+}
+```
+
+#### 1.2: Elasticsearch Health Check
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "name": "kaleidoscope-ai-elasticsearch-1",
+  "cluster_name": "docker-cluster",
+  "cluster_uuid": "...",
+  "version": {
+    "number": "8.10.2",
+    "build_flavor": "default",
+    "build_type": "docker",
+    "build_hash": "...",
+    "build_date": "2025-10-15T10:00:00.000Z",
+    "build_snapshot": false,
+    "lucene_version": "9.8.0",
+    "minimum_wire_compatibility_version": "7.17.0",
+    "minimum_index_compatibility_version": "7.0.0"
+  },
+  "tagline": "You Know, for Search"
+}
+```
+
+#### 1.3: Docker Services Status
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:2375/containers/json`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:2375/containers/json" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:** Array of running containers including:
+
+- `kaleidoscope-ai-redis-1`
+- `kaleidoscope-ai-elasticsearch-1`
+- `kaleidoscope-ai-content_moderation-1`
+- `kaleidoscope-ai-image_tagger-1`
+- `kaleidoscope-ai-scene_recognition-1`
+- `kaleidoscope-ai-image_captioning-1`
+- `kaleidoscope-ai-face_recognition-1`
+- `kaleidoscope-ai-post_aggregator-1`
+- `kaleidoscope-ai-es_sync-1`
+
+### Test 2: Elasticsearch Indices Management
+
+#### 2.1: List All Indices
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/_cat/indices?v`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/_cat/indices?v" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```
+health status index                    uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+yellow open   media_search            abc123...              2   1          0            0       208b           208b
+yellow open   post_search             def456...              2   1          0            0       208b           208b
+yellow open   user_search             ghi789...              2   1          0            0       208b           208b
+yellow open   face_search             jkl012...              2   1          0            0       208b           208b
+yellow open   recommendations_knn     mno345...              2   1          0            0       208b           208b
+yellow open   feed_personalized       pqr678...              2   1          0            0       208b           208b
+yellow open   known_faces_index       stu901...              2   1          0            0       208b           208b
+```
+
+#### 2.2: Get Index Mapping
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/media_search/_mapping`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/media_search/_mapping" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "media_search": {
+    "mappings": {
+      "properties": {
+        "media_id": { "type": "long" },
+        "post_id": { "type": "long" },
+        "ai_caption": { "type": "text" },
+        "ai_tags": { "type": "keyword" },
+        "image_embedding": {
+          "type": "dense_vector",
+          "dims": 512,
+          "index": true,
+          "similarity": "cosine"
+        }
+      }
+    }
+  }
+}
+```
+
+#### 2.3: Create Index (if needed)
+
+**Postman Setup:**
+
+- **Method**: PUT
+- **URL**: `http://localhost:9200/test_index`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "mappings": {
+    "properties": {
+      "test_field": { "type": "text" }
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X PUT "http://localhost:9200/test_index" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mappings": {
+      "properties": {
+        "test_field": {"type": "text"}
+      }
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "acknowledged": true,
+  "shards_acknowledged": true,
+  "index": "test_index"
+}
+```
+
+#### 2.4: Delete Test Index
+
+**Postman Setup:**
+
+- **Method**: DELETE
+- **URL**: `http://localhost:9200/test_index`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X DELETE "http://localhost:9200/test_index" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "acknowledged": true
+}
+```
+
+### Test 3: Document Operations
+
+#### 3.1: Index a Document
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_doc/test_doc_1`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "media_id": 12345,
+  "post_id": 100,
+  "post_title": "Test Post - Beach Vacation",
+  "ai_caption": "Beautiful sunset at the beach with people enjoying the view",
+  "ai_tags": ["beach", "sunset", "people", "vacation"],
+  "ai_scenes": ["beach", "outdoor"],
+  "image_embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+  "is_safe": true,
+  "detected_users": [
+    { "user_id": 1, "username": "alice" },
+    { "user_id": 2, "username": "bob" }
+  ],
+  "uploader_id": 1,
+  "uploader_username": "alice",
+  "uploader_department": "Engineering",
+  "reaction_count": 42,
+  "comment_count": 10,
+  "created_at": "2025-10-15T10:00:00Z",
+  "updated_at": "2025-10-15T10:00:00Z"
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_doc/test_doc_1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "media_id": 12345,
+    "post_id": 100,
+    "post_title": "Test Post - Beach Vacation",
+    "ai_caption": "Beautiful sunset at the beach with people enjoying the view",
+    "ai_tags": ["beach", "sunset", "people", "vacation"],
+    "ai_scenes": ["beach", "outdoor"],
+    "image_embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "is_safe": true,
+    "detected_users": [
+      {"user_id": 1, "username": "alice"},
+      {"user_id": 2, "username": "bob"}
+    ],
+    "uploader_id": 1,
+    "uploader_username": "alice",
+    "uploader_department": "Engineering",
+    "reaction_count": 42,
+    "comment_count": 10,
+    "created_at": "2025-10-15T10:00:00Z",
+    "updated_at": "2025-10-15T10:00:00Z"
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "_index": "media_search",
+  "_id": "test_doc_1",
+  "_version": 1,
+  "result": "created",
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0
+  },
+  "_seq_no": 0,
+  "_primary_term": 1
+}
+```
+
+#### 3.2: Get Document by ID
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/media_search/_doc/test_doc_1`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/media_search/_doc/test_doc_1" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "_index": "media_search",
+  "_id": "test_doc_1",
+  "_version": 1,
+  "_seq_no": 0,
+  "_primary_term": 1,
+  "found": true,
+  "_source": {
+    "media_id": 12345,
+    "post_id": 100,
+    "post_title": "Test Post - Beach Vacation",
+    "ai_caption": "Beautiful sunset at the beach with people enjoying the view",
+    "ai_tags": ["beach", "sunset", "people", "vacation"],
+    "ai_scenes": ["beach", "outdoor"],
+    "image_embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "is_safe": true,
+    "detected_users": [
+      { "user_id": 1, "username": "alice" },
+      { "user_id": 2, "username": "bob" }
+    ],
+    "uploader_id": 1,
+    "uploader_username": "alice",
+    "uploader_department": "Engineering",
+    "reaction_count": 42,
+    "comment_count": 10,
+    "created_at": "2025-10-15T10:00:00Z",
+    "updated_at": "2025-10-15T10:00:00Z"
+  }
+}
+```
+
+#### 3.3: Update Document
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_update/test_doc_1`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "doc": {
+    "reaction_count": 50,
+    "comment_count": 12,
+    "updated_at": "2025-10-15T11:00:00Z"
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_update/test_doc_1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "doc": {
+      "reaction_count": 50,
+      "comment_count": 12,
+      "updated_at": "2025-10-15T11:00:00Z"
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "_index": "media_search",
+  "_id": "test_doc_1",
+  "_version": 2,
+  "result": "updated",
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0
+  },
+  "_seq_no": 1,
+  "_primary_term": 1
+}
+```
+
+#### 3.4: Delete Document
+
+**Postman Setup:**
+
+- **Method**: DELETE
+- **URL**: `http://localhost:9200/media_search/_doc/test_doc_1`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X DELETE "http://localhost:9200/media_search/_doc/test_doc_1" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "_index": "media_search",
+  "_id": "test_doc_1",
+  "_version": 3,
+  "result": "deleted",
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0
+  },
+  "_seq_no": 2,
+  "_primary_term": 1
+}
+```
+
+### Test 4: Search Operations
+
+#### 4.1: Simple Text Search
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/media_search/_search?q=beach`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/media_search/_search?q=beach" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "took": 44,
+  "timed_out": false,
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 1,
+      "relation": "eq"
+    },
+    "max_score": 0.395,
+    "hits": [
+      {
+        "_index": "media_search",
+        "_id": "test_doc_1",
+        "_score": 0.395,
+        "_source": {
+          "media_id": 12345,
+          "ai_caption": "Beautiful sunset at the beach...",
+          "ai_tags": ["beach", "sunset", "people", "vacation"]
+        }
+      }
+    ]
+  }
+}
+```
+
+#### 4.2: Multi-Field Search
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "query": {
+    "multi_match": {
+      "query": "beach sunset",
+      "fields": ["ai_caption", "ai_tags", "post_title"]
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "multi_match": {
+        "query": "beach sunset",
+        "fields": ["ai_caption", "ai_tags", "post_title"]
+      }
+    }
+  }'
+```
+
+#### 4.3: Filtered Search
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "query": {
+    "bool": {
+      "must": [{ "match": { "ai_caption": "beach" } }],
+      "filter": [
+        { "term": { "is_safe": true } },
+        { "range": { "reaction_count": { "gte": 40 } } }
+      ]
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "bool": {
+        "must": [
+          {"match": {"ai_caption": "beach"}}
+        ],
+        "filter": [
+          {"term": {"is_safe": true}},
+          {"range": {"reaction_count": {"gte": 40}}}
+        ]
+      }
+    }
+  }'
+```
+
+#### 4.4: Aggregations
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "popular_tags": {
+      "terms": {
+        "field": "ai_tags",
+        "size": 10
+      }
+    },
+    "avg_reactions": {
+      "avg": {
+        "field": "reaction_count"
+      }
+    },
+    "safe_content": {
+      "terms": {
+        "field": "is_safe"
+      }
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "size": 0,
+    "aggs": {
+      "popular_tags": {
+        "terms": {
+          "field": "ai_tags",
+          "size": 10
+        }
+      },
+      "avg_reactions": {
+        "avg": {
+          "field": "reaction_count"
+        }
+      },
+      "safe_content": {
+        "terms": {
+          "field": "is_safe"
+        }
+      }
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "took": 15,
+  "timed_out": false,
+  "_shards": {
+    "total": 2,
+    "successful": 2,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 1,
+      "relation": "eq"
+    },
+    "max_score": null,
+    "hits": []
+  },
+  "aggregations": {
+    "popular_tags": {
+      "doc_count_error_upper_bound": 0,
+      "sum_other_doc_count": 0,
+      "buckets": [
+        {
+          "key": "beach",
+          "doc_count": 1
+        },
+        {
+          "key": "sunset",
+          "doc_count": 1
+        }
+      ]
+    },
+    "avg_reactions": {
+      "value": 42.0
+    },
+    "safe_content": {
+      "doc_count_error_upper_bound": 0,
+      "sum_other_doc_count": 0,
+      "buckets": [
+        {
+          "key": true,
+          "doc_count": 1
+        }
+      ]
+    }
+  }
+}
+```
+
+### Test 5: Vector Search (KNN)
+
+#### 5.1: KNN Similarity Search
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "knn": {
+    "field": "image_embedding",
+    "query_vector": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "k": 5,
+    "num_candidates": 100
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "knn": {
+      "field": "image_embedding",
+      "query_vector": [0.1, 0.2, 0.3, 0.4, 0.5],
+      "k": 5,
+      "num_candidates": 100
+    }
+  }'
+```
+
+#### 5.2: Hybrid Search (Text + Vector)
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "query": {
+    "bool": {
+      "should": [
+        {
+          "multi_match": {
+            "query": "beach sunset",
+            "fields": ["ai_caption", "ai_tags"]
+          }
+        },
+        {
+          "knn": {
+            "field": "image_embedding",
+            "query_vector": [0.1, 0.2, 0.3, 0.4, 0.5],
+            "k": 5,
+            "num_candidates": 100
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "bool": {
+        "should": [
+          {
+            "multi_match": {
+              "query": "beach sunset",
+              "fields": ["ai_caption", "ai_tags"]
+            }
+          },
+          {
+            "knn": {
+              "field": "image_embedding",
+              "query_vector": [0.1, 0.2, 0.3, 0.4, 0.5],
+              "k": 5,
+              "num_candidates": 100
+            }
+          }
+        ]
+      }
+    }
+  }'
+```
+
+---
+
+## Redis Streams Testing
+
+### Test 6: Redis Streams Operations
+
+#### 6.1: Check Stream Information
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": ["redis-cli", "XINFO", "STREAM", "post-image-processing"]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli XINFO STREAM post-image-processing
+```
+
+**Expected Response:**
+
+```
+ 1) "length"
+ 2) (integer) 0
+ 3) "radix-tree-keys"
+ 4) (integer) 1
+ 5) "radix-tree-nodes"
+ 6) (integer) 2
+ 7) "last-generated-id"
+ 8) "0-0"
+ 9) "entries"
+10) (nil)
+11) "groups"
+12) (empty array)
+13) "first-entry"
+14) (nil)
+15) "last-entry"
+16) (nil)
+```
+
+#### 6.2: List All Streams
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": ["redis-cli", "KEYS", "*"]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli KEYS "*"
+```
+
+**Expected Response:**
+
+```
+1) "post-image-processing"
+2) "ml-insights-results"
+3) "face-detection-results"
+4) "post-insights-enriched"
+5) "es-sync-queue"
+```
+
+#### 6.3: Add Message to Stream
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": [
+    "redis-cli",
+    "XADD",
+    "post-image-processing",
+    "*",
+    "job_id",
+    "test_job_123",
+    "post_id",
+    "100",
+    "media_id",
+    "500",
+    "image_url",
+    "https://example.com/test.jpg",
+    "user_id",
+    "1"
+  ]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli XADD post-image-processing "*" job_id "test_job_123" post_id "100" media_id "500" image_url "https://example.com/test.jpg" user_id "1"
+```
+
+**Expected Response:**
+
+```
+"1760538114772-0"
+```
+
+#### 6.4: Read Messages from Stream
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": ["redis-cli", "XREAD", "STREAMS", "post-image-processing", "0"]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli XREAD STREAMS post-image-processing 0
+```
+
+**Expected Response:**
+
+```
+1) 1) "post-image-processing"
+   2) 1) 1) "1760538114772-0"
+         2) 1) "job_id"
+            2) "test_job_123"
+            3) "post_id"
+            4) "100"
+            5) "media_id"
+            6) "500"
+            7) "image_url"
+            8) "https://example.com/test.jpg"
+            9) "user_id"
+           10) "1"
+```
+
+#### 6.5: Create Consumer Group
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": [
+    "redis-cli",
+    "XGROUP",
+    "CREATE",
+    "post-image-processing",
+    "test-group",
+    "0",
+    "MKSTREAM"
+  ]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli XGROUP CREATE post-image-processing test-group 0 MKSTREAM
+```
+
+**Expected Response:**
+
+```
+OK
+```
+
+#### 6.6: Read from Consumer Group
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-redis-1/exec`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "Cmd": [
+    "redis-cli",
+    "XREADGROUP",
+    "GROUP",
+    "test-group",
+    "consumer1",
+    "COUNT",
+    "1",
+    "STREAMS",
+    "post-image-processing",
+    ">"
+  ]
+}
+```
+
+**curl Command:**
+
+```bash
+docker exec -it kaleidoscope-ai-redis-1 redis-cli XREADGROUP GROUP test-group consumer1 COUNT 1 STREAMS post-image-processing ">"
+```
+
+### Test 7: Service Health Checks
+
+#### 7.1: Check Service Logs
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-content_moderation-1/logs?stdout=true&stderr=true&tail=10`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:2375/containers/kaleidoscope-ai-content_moderation-1/logs?stdout=true&stderr=true&tail=10"
+```
+
+#### 7.2: Check Service Stats
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:2375/containers/kaleidoscope-ai-content_moderation-1/stats`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:2375/containers/kaleidoscope-ai-content_moderation-1/stats"
+```
+
+**Expected Response:**
+
+```json
+{
+  "read": "2025-10-15T10:00:00.000Z",
+  "preread": "2025-10-15T09:59:59.000Z",
+  "pids_stats": {
+    "current": 1
+  },
+  "blkio_stats": {
+    "io_service_bytes_recursive": [],
+    "io_serviced_recursive": [],
+    "io_queue_recursive": [],
+    "io_service_time_recursive": [],
+    "io_wait_time_recursive": [],
+    "io_merged_recursive": [],
+    "io_time_recursive": [],
+    "sectors_recursive": []
+  },
+  "num_procs": 0,
+  "storage_stats": {},
+  "cpu_stats": {
+    "cpu_usage": {
+      "total_usage": 1000000000,
+      "percpu_usage": [1000000000],
+      "usage_in_kernelmode": 500000000,
+      "usage_in_usermode": 500000000
+    },
+    "system_cpu_usage": 2000000000,
+    "online_cpus": 1,
+    "throttling_data": {
+      "periods": 0,
+      "throttled_periods": 0,
+      "throttled_time": 0
+    }
+  },
+  "precpu_stats": {
+    "cpu_usage": {
+      "total_usage": 0,
+      "percpu_usage": [0],
+      "usage_in_kernelmode": 0,
+      "usage_in_usermode": 0
+    },
+    "system_cpu_usage": 0,
+    "online_cpus": 1,
+    "throttling_data": {
+      "periods": 0,
+      "throttled_periods": 0,
+      "throttled_time": 0
+    }
+  },
+  "memory_stats": {
+    "usage": 50000000,
+    "max_usage": 100000000,
+    "stats": {
+      "active_anon": 40000000,
+      "active_file": 10000000,
+      "cache": 10000000,
+      "dirty": 0,
+      "hierarchical_memory_limit": 9223372036854771712,
+      "hierarchical_memsw_limit": 9223372036854771712,
+      "inactive_anon": 0,
+      "inactive_file": 0,
+      "mapped_file": 0,
+      "pgfault": 1000,
+      "pgmajfault": 0,
+      "pgpgin": 1000,
+      "pgpgout": 500,
+      "rss": 40000000,
+      "rss_huge": 0,
+      "total_active_anon": 40000000,
+      "total_active_file": 10000000,
+      "total_cache": 10000000,
+      "total_dirty": 0,
+      "total_inactive_anon": 0,
+      "total_inactive_file": 0,
+      "total_mapped_file": 0,
+      "total_pgfault": 1000,
+      "total_pgmajfault": 0,
+      "total_pgpgin": 1000,
+      "total_pgpgout": 500,
+      "total_rss": 40000000,
+      "total_rss_huge": 0,
+      "total_unevictable": 0,
+      "total_writeback": 0,
+      "unevictable": 0,
+      "writeback": 0
+    },
+    "limit": 9223372036854771712
+  },
+  "name": "/kaleidoscope-ai-content_moderation-1",
+  "id": "abc123...",
+  "networks": {
+    "kaleidoscope-ai_default": {
+      "rx_bytes": 1000,
+      "rx_dropped": 0,
+      "rx_errors": 0,
+      "rx_packets": 10,
+      "tx_bytes": 2000,
+      "tx_dropped": 0,
+      "tx_errors": 0,
+      "tx_packets": 20
+    }
+  }
+}
+```
+
+---
+
+## Elasticsearch API Testing
+
+### Test 8: Advanced Elasticsearch Operations
+
+#### 8.1: Bulk Index Operations
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/_bulk`
+- **Headers**: `Content-Type: application/x-ndjson`
+- **Body** (raw text):
+
+```
+{"index":{"_index":"media_search","_id":"bulk_doc_1"}}
+{"media_id":11111,"post_id":200,"ai_caption":"Test bulk document 1","ai_tags":["test","bulk"],"is_safe":true}
+{"index":{"_index":"media_search","_id":"bulk_doc_2"}}
+{"media_id":22222,"post_id":201,"ai_caption":"Test bulk document 2","ai_tags":["test","bulk"],"is_safe":true}
+{"delete":{"_index":"media_search","_id":"bulk_doc_1"}}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/_bulk" \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary @- << EOF
+{"index":{"_index":"media_search","_id":"bulk_doc_1"}}
+{"media_id":11111,"post_id":200,"ai_caption":"Test bulk document 1","ai_tags":["test","bulk"],"is_safe":true}
+{"index":{"_index":"media_search","_id":"bulk_doc_2"}}
+{"media_id":22222,"post_id":201,"ai_caption":"Test bulk document 2","ai_tags":["test","bulk"],"is_safe":true}
+{"delete":{"_index":"media_search","_id":"bulk_doc_1"}}
+EOF
+```
+
+**Expected Response:**
+
+```json
+{
+  "took": 15,
+  "errors": false,
+  "items": [
+    {
+      "index": {
+        "_index": "media_search",
+        "_id": "bulk_doc_1",
+        "_version": 1,
+        "result": "created",
+        "_shards": {
+          "total": 2,
+          "successful": 2,
+          "failed": 0
+        },
+        "_seq_no": 0,
+        "_primary_term": 1,
+        "status": 201
+      }
+    },
+    {
+      "index": {
+        "_index": "media_search",
+        "_id": "bulk_doc_2",
+        "_version": 1,
+        "result": "created",
+        "_shards": {
+          "total": 2,
+          "successful": 2,
+          "failed": 0
+        },
+        "_seq_no": 1,
+        "_primary_term": 1,
+        "status": 201
+      }
+    },
+    {
+      "delete": {
+        "_index": "media_search",
+        "_id": "bulk_doc_1",
+        "_version": 2,
+        "result": "deleted",
+        "_shards": {
+          "total": 2,
+          "successful": 2,
+          "failed": 0
+        },
+        "_seq_no": 2,
+        "_primary_term": 1,
+        "status": 200
+      }
+    }
+  ]
+}
+```
+
+#### 8.2: Multi-Index Search
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search,post_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "query": {
+    "match_all": {}
+  },
+  "size": 10
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search,post_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "match_all": {}
+    },
+    "size": 10
+  }'
+```
+
+#### 8.3: Index Templates
+
+**Postman Setup:**
+
+- **Method**: PUT
+- **URL**: `http://localhost:9200/_index_template/test_template`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "index_patterns": ["test_*"],
+  "template": {
+    "mappings": {
+      "properties": {
+        "test_field": { "type": "text" },
+        "created_at": { "type": "date" }
+      }
+    }
+  }
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X PUT "http://localhost:9200/_index_template/test_template" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "index_patterns": ["test_*"],
+    "template": {
+      "mappings": {
+        "properties": {
+          "test_field": {"type": "text"},
+          "created_at": {"type": "date"}
+        }
+      }
+    }
+  }'
+```
+
+#### 8.4: Cluster Health
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/_cluster/health`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/_cluster/health" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+
+```json
+{
+  "cluster_name": "docker-cluster",
+  "status": "yellow",
+  "timed_out": false,
+  "number_of_nodes": 1,
+  "number_of_data_nodes": 1,
+  "active_primary_shards": 7,
+  "active_shards": 7,
+  "relocating_shards": 0,
+  "initializing_shards": 0,
+  "unassigned_shards": 7,
+  "delayed_unassigned_shards": 0,
+  "number_of_pending_tasks": 0,
+  "number_of_in_flight_fetch": 0,
+  "task_max_waiting_in_queue_millis": 0,
+  "active_shards_percent_as_number": 50.0
+}
+```
+
+#### 8.5: Node Stats
+
+**Postman Setup:**
+
+- **Method**: GET
+- **URL**: `http://localhost:9200/_nodes/stats`
+- **Headers**: `Content-Type: application/json`
+
+**curl Command:**
+
+```bash
+curl -X GET "http://localhost:9200/_nodes/stats" \
+  -H "Content-Type: application/json"
+```
+
+### Test 9: Performance Testing
+
+#### 9.1: Search Performance Test
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/media_search/_search`
+- **Headers**: `Content-Type: application/json`
+- **Body**:
+
+```json
+{
+  "query": {
+    "match_all": {}
+  },
+  "size": 100,
+  "profile": true
+}
+```
+
+**curl Command:**
+
+```bash
+curl -X POST "http://localhost:9200/media_search/_search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "match_all": {}
+    },
+    "size": 100,
+    "profile": true
+  }'
+```
+
+#### 9.2: Index Performance Test
+
+**Postman Setup:**
+
+- **Method**: POST
+- **URL**: `http://localhost:9200/_bulk`
+- **Headers**: `Content-Type: application/x-ndjson`
+- **Body** (create 100 test documents):
+
+```
+{"index":{"_index":"media_search"}}
+{"media_id":1,"ai_caption":"Performance test document 1","ai_tags":["test","performance"]}
+{"index":{"_index":"media_search"}}
+{"media_id":2,"ai_caption":"Performance test document 2","ai_tags":["test","performance"]}
+...
+```
+
+**curl Command:**
+
+```bash
+# Create a file with bulk data
+cat > bulk_test.json << EOF
+{"index":{"_index":"media_search"}}
+{"media_id":1,"ai_caption":"Performance test document 1","ai_tags":["test","performance"]}
+{"index":{"_index":"media_search"}}
+{"media_id":2,"ai_caption":"Performance test document 2","ai_tags":["test","performance"]}
+EOF
+
+# Execute bulk operation
+curl -X POST "http://localhost:9200/_bulk" \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary @bulk_test.json
+```
+
+---
+
+## Complete Testing Workflow
+
+### Step-by-Step Testing Process
+
+Follow this comprehensive workflow to test every aspect of the system:
+
+#### Phase 1: Infrastructure Verification (5 minutes)
+
+1. **Start System**
+
+   ```bash
+   cd kaleidoscope-ai
+   docker compose up -d
+   ```
+
+2. **Run Infrastructure Tests**
+
+   - Execute Postman collection: "1. Infrastructure Health Checks"
+   - Verify all 3 tests pass
+   - Check Docker services are running
+
+3. **Verify Elasticsearch**
+
+   ```bash
+   curl -X GET "http://localhost:9200"
+   ```
+
+4. **Verify Redis**
+   ```bash
+   docker exec -it kaleidoscope-ai-redis-1 redis-cli ping
+   ```
+
+#### Phase 2: Elasticsearch Setup (10 minutes)
+
+1. **Create Indices**
+
+   ```bash
+   python scripts/setup_es_indices.py
+   ```
+
+2. **Verify Indices**
+
+   - Execute Postman collection: "2. Elasticsearch Management"
+   - Run "2.1 List All Indices"
+   - Verify 7 indices exist
+
+3. **Test Index Operations**
+   - Run "2.3 Create Test Index"
+   - Run "2.4 Delete Test Index"
+   - Verify operations succeed
+
+#### Phase 3: Document Operations (15 minutes)
+
+1. **Index Test Document**
+
+   - Execute Postman collection: "3. Document Operations"
+   - Run "3.1 Index Document"
+   - Verify document created
+
+2. **Retrieve Document**
+
+   - Run "3.2 Get Document by ID"
+   - Verify document retrieved correctly
+
+3. **Update Document**
+
+   - Run "3.3 Update Document"
+   - Verify document updated
+
+4. **Delete Document**
+   - Run "3.4 Delete Document"
+   - Verify document deleted
+
+#### Phase 4: Search Operations (20 minutes)
+
+1. **Re-index Test Data**
+
+   - Run "3.1 Index Document" again
+   - Add multiple test documents
+
+2. **Text Search**
+
+   - Execute Postman collection: "4. Search Operations"
+   - Run "4.1 Simple Text Search"
+   - Run "4.2 Multi-Field Search"
+   - Run "4.3 Filtered Search"
+
+3. **Aggregations**
+
+   - Run "4.4 Aggregations"
+   - Verify aggregation results
+
+4. **Vector Search**
+   - Execute Postman collection: "5. Vector Search (KNN)"
+   - Run "5.1 KNN Similarity Search"
+   - Run "5.2 Hybrid Search"
+
+#### Phase 5: Redis Streams Testing (15 minutes)
+
+1. **Check Streams**
+
+   - Execute Postman collection: "6. Redis Streams"
+   - Run "6.1 Check Stream Information"
+   - Run "6.2 List All Streams"
+
+2. **Stream Operations**
+   - Run "6.3 Add Message to Stream"
+   - Run "6.4 Read Messages from Stream"
+   - Run "6.5 Create Consumer Group"
+   - Run "6.6 Read from Consumer Group"
+
+#### Phase 6: Service Health (10 minutes)
+
+1. **Check Service Logs**
+
+   - Execute Postman collection: "7. Service Health Checks"
+   - Run "7.1 Check Service Logs"
+   - Run "7.2 Check Service Stats"
+
+2. **Verify All Services**
+   ```bash
+   docker compose ps
+   ```
+
+#### Phase 7: Advanced Operations (15 minutes)
+
+1. **Bulk Operations**
+
+   - Execute Postman collection: "8. Advanced ES Operations"
+   - Run "8.1 Bulk Index Operations"
+   - Run "8.2 Multi-Index Search"
+
+2. **Performance Testing**
+
+   - Run "8.3 Search with Profile"
+   - Run "8.4 Index Performance Test"
+
+3. **Cleanup**
+   - Run "8.5 Clear Test Data"
+
+#### Phase 8: End-to-End Testing (20 minutes)
+
+1. **Run Automated Tests**
+
+   ```bash
+   python tests/test_end_to_end.py
+   ```
+
+2. **Verify All Tests Pass**
+
+   - Check test output
+   - Verify no errors
+
+3. **Performance Verification**
+   - Check response times
+   - Verify throughput
+
+### Testing Checklist
+
+#### Infrastructure ✅
+
+- [ ] Docker services running
+- [ ] Elasticsearch accessible
+- [ ] Redis accessible
+- [ ] All 7 ES indices created
+
+#### Document Operations ✅
+
+- [ ] Index document
+- [ ] Retrieve document
+- [ ] Update document
+- [ ] Delete document
+
+#### Search Operations ✅
+
+- [ ] Simple text search
+- [ ] Multi-field search
+- [ ] Filtered search
+- [ ] Aggregations
+- [ ] Vector search (KNN)
+- [ ] Hybrid search
+
+#### Redis Streams ✅
+
+- [ ] Stream information
+- [ ] Add messages
+- [ ] Read messages
+- [ ] Consumer groups
+- [ ] Group reading
+
+#### Service Health ✅
+
+- [ ] Service logs accessible
+- [ ] Service stats available
+- [ ] All services running
+
+#### Advanced Operations ✅
+
+- [ ] Bulk operations
+- [ ] Multi-index search
+- [ ] Performance profiling
+- [ ] Data cleanup
+
+#### End-to-End ✅
+
+- [ ] Automated tests pass
+- [ ] Performance acceptable
+- [ ] No errors in logs
+
+### Expected Results
+
+#### Response Times
+
+- **Elasticsearch queries**: < 100ms
+- **Document operations**: < 50ms
+- **Bulk operations**: < 500ms
+- **Vector search**: < 200ms
+
+#### Success Rates
+
+- **All API calls**: 100% success
+- **Search accuracy**: > 95%
+- **Service uptime**: 100%
+
+#### Data Integrity
+
+- **Document consistency**: 100%
+- **Search results**: Accurate
+- **Stream processing**: Reliable
+
+---
+
+## Advanced Testing
+
+### Test Vector Similarity Search (KNN)
+
+**Note**: Requires documents with embeddings
+
+#### Create KNN Search Script
+
+Create `test_knn_search.py`:
+
+```python
+import requests
+import json
+
+ES_HOST = "http://localhost:9200"
+
+# Create a query vector (512-dim, all 0.1 for testing)
+query_vector = [0.1] * 512
+
+query = {
+    "knn": {
+        "field": "image_embedding",
+        "query_vector": query_vector,
+        "k": 5,
+        "num_candidates": 100
+    }
+}
+
+print("Testing KNN similarity search...")
+print("=" * 70)
+
+response = requests.post(
+    f"{ES_HOST}/media_search/_search",
+    json=query,
+    headers={"Content-Type": "application/json"}
+)
+
+if response.status_code == 200:
+    results = response.json()
+    print(f"✓ KNN search successful")
+    print(f"  Found: {results['hits']['total']['value']} similar documents")
+    print(f"  Time: {results['took']}ms")
+    print()
+
+    for i, hit in enumerate(results['hits']['hits'], 1):
+        print(f"  Result {i}:")
+        print(f"    ID: {hit['_id']}")
+        print(f"    Score: {hit['_score']}")
+        print(f"    Caption: {hit['_source'].get('ai_caption', 'N/A')[:60]}...")
+else:
+    print(f"✗ KNN search failed: {response.status_code}")
+    print(response.text)
+```
+
+Run:
+
+```powershell
+python test_knn_search.py
+```
+
+---
+
+## Troubleshooting
+
+### Issue: No Messages in Stream
+
+**Symptom**: `check_ml_results.py` shows no messages
+
+**Solutions**:
+
+1. Check if AI services are running:
+
+   ```powershell
+   docker compose ps
+   ```
+
+2. Check service logs for errors:
+
+   ```powershell
+   docker compose logs content_moderation --tail=50
+   ```
+
+3. Verify job was published:
+
+   ```powershell
+   docker exec -it kaleidoscope-ai-redis-1 redis-cli XLEN post-image-processing
+   ```
+
+4. Check HuggingFace API status (services may be slow)
+
+### Issue: Document Not Found in Elasticsearch
+
+**Symptom**: ES Sync publishes but document not found
+
+**Solutions**:
+
+1. Check ES Sync logs:
+
+   ```powershell
+   docker compose logs es_sync --tail=50
+   ```
+
+2. Verify Elasticsearch is running:
+
+   ```powershell
+   curl http://localhost:9200
+   ```
+
+3. Check if index exists:
+
+   ```powershell
+   curl http://localhost:9200/_cat/indices?v
+   ```
+
+4. Manual index check:
+   ```powershell
+   curl http://localhost:9200/media_search/_search
+   ```
+
+### Issue: Slow AI Processing
+
+**Symptom**: AI services take > 60 seconds
+
+**Reasons**:
+
+- HuggingFace API may be slow (free tier)
+- Network latency
+- API rate limiting
+
+**Solutions**:
+
+- Wait longer (up to 2 minutes)
+- Check logs for specific errors
+- Verify internet connection
+
+### Issue: Search Returns No Results
+
+**Symptom**: Search query returns 0 hits
+
+**Solutions**:
+
+1. Verify index has documents:
+
+   ```powershell
+   curl "http://localhost:9200/media_search/_count"
+   ```
+
+2. Check if documents match query:
+
+   ```powershell
+   curl "http://localhost:9200/media_search/_search?size=10"
+   ```
+
+3. Try simpler query:
+   ```powershell
+   curl "http://localhost:9200/media_search/_search?q=*"
+   ```
+
+---
+
+## Test Data Reference
+
+### Sample Image URLs (for testing)
+
+```
+Beach scenes:
+- https://images.unsplash.com/photo-1507525428034-b723cf961d3e
+- https://images.unsplash.com/photo-1506126613408-eca07ce68773
+- https://images.unsplash.com/photo-1519046904884-53103b34b206
+
+Team/Office:
+- https://images.unsplash.com/photo-1522071820081-009f0129c71c
+- https://images.unsplash.com/photo-1556761175-5973dc0f32e7
+
+Nature:
+- https://images.unsplash.com/photo-1506905925346-21bda4d32df4
+- https://images.unsplash.com/photo-1441974231531-c6227db76b6e
+```
+
+### Sample Post IDs
+
+```
+99999 - Main test post
+88888 - Secondary test
+77777 - Third test
+```
+
+### Sample Media IDs
+
+```
+88801, 88802, 88803 - Test media set 1
+77701, 77702, 77703 - Test media set 2
+```
+
+---
+
+## Quick Command Reference
+
+### Start/Stop Services
+
+```powershell
+# Start all
+docker compose up -d
+
+# Start specific
+docker compose up -d redis elasticsearch
+
+# Stop all
+docker compose down
+
+# Restart service
+docker compose restart es_sync
+```
+
+### Check Logs
+
+```powershell
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f content_moderation
+
+# Last N lines
+docker compose logs --tail=50 es_sync
+```
+
+### Redis Commands
+
+```powershell
+# Enter Redis CLI
+docker exec -it kaleidoscope-ai-redis-1 redis-cli
+
+# Check stream length
+XLEN post-image-processing
+
+# Read stream
+XREVRANGE ml-insights-results + - COUNT 5
+
+# Check all streams
+KEYS *
+```
+
+### Elasticsearch Commands
+
+```powershell
+# List indices
+curl http://localhost:9200/_cat/indices?v
+
+# Count documents
+curl http://localhost:9200/media_search/_count
+
+# Get document
+curl http://localhost:9200/media_search/_doc/test_id
+
+# Delete document
+curl -X DELETE http://localhost:9200/media_search/_doc/test_id
+
+# Delete index
+curl -X DELETE http://localhost:9200/media_search
+```
+
+---
+
+## Checklist for Complete Manual Testing
+
+- [ ] Environment setup verified
+- [ ] All services running
+- [ ] Infrastructure tests passed
+- [ ] Write Path:
+  - [ ] Published image job
+  - [ ] AI services processed job
+  - [ ] ML results appeared
+  - [ ] Post aggregator enriched data
+  - [ ] ES Sync indexed document
+  - [ ] Document verified in Elasticsearch
+- [ ] Read Path:
+  - [ ] Simple text search working
+  - [ ] Multi-field search working
+  - [ ] Filtered search working
+  - [ ] Aggregations working
+  - [ ] Performance acceptable (< 500ms)
+- [ ] Advanced:
+  - [ ] KNN search tested (if applicable)
+  - [ ] All 7 indices tested
+  - [ ] Error handling verified
+  - [ ] Retry logic tested
+
+---
+
+**Testing Complete!**
+
+For automated testing, see `tests/test_end_to_end.py`.
+
+For system documentation, see `END_TO_END_PROJECT_DOCUMENTATION.md`.

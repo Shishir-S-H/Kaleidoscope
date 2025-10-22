@@ -1,0 +1,93 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 2,
+      "number_of_replicas": 1,
+      "analysis": {
+        "analyzer": {
+          "standard_lowercase": {
+            "type": "standard",
+            "stopwords": "_english_"
+          }
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "media_id": {
+        "type": "long"
+      },
+      "post_id": {
+        "type": "long"
+      },
+      "post_title": {
+        "type": "text",
+        "analyzer": "standard_lowercase",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "post_all_tags": {
+        "type": "keyword"
+      },
+      "media_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "ai_caption": {
+        "type": "text",
+        "analyzer": "standard_lowercase"
+      },
+      "ai_tags": {
+        "type": "keyword"
+      },
+      "ai_scenes": {
+        "type": "keyword"
+      },
+      "image_embedding": {
+        "type": "dense_vector",
+        "dims": 512,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "is_safe": {
+        "type": "boolean"
+      },
+      "detected_users": {
+        "type": "nested",
+        "properties": {
+          "user_id": {
+            "type": "long"
+          },
+          "username": {
+            "type": "keyword"
+          }
+        }
+      },
+      "uploader_id": {
+        "type": "long"
+      },
+      "uploader_username": {
+        "type": "keyword"
+      },
+      "uploader_department": {
+        "type": "keyword"
+      },
+      "reaction_count": {
+        "type": "integer"
+      },
+      "comment_count": {
+        "type": "integer"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
+    }
+  }
+}

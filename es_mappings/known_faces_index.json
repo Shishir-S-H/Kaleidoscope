@@ -1,0 +1,37 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1
+    }
+  },
+  "mappings": {
+    "properties": {
+      "user_id": {
+        "type": "long"
+      },
+      "username": {
+        "type": "keyword"
+      },
+      "department": {
+        "type": "keyword"
+      },
+      "profile_pic_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "face_embedding": {
+        "type": "dense_vector",
+        "dims": 1024,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "enrolled_at": {
+        "type": "date"
+      },
+      "is_active": {
+        "type": "boolean"
+      }
+    }
+  }
+}

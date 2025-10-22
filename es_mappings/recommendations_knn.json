@@ -1,0 +1,35 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 2,
+      "number_of_replicas": 1
+    }
+  },
+  "mappings": {
+    "properties": {
+      "media_id": {
+        "type": "long"
+      },
+      "image_embedding": {
+        "type": "dense_vector",
+        "dims": 512,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "media_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "caption": {
+        "type": "text",
+        "index": false
+      },
+      "is_safe": {
+        "type": "boolean"
+      },
+      "created_at": {
+        "type": "date"
+      }
+    }
+  }
+}

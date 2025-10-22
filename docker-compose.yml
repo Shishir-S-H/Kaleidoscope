@@ -1,129 +1,281 @@
-version: "3.8"
+# Docker Compose file for Kaleidoscope AI Microservices
+# Note: version field is obsolete in modern Docker Compose
 
 services:
-  upload_gateway:
-    build: ./services/upload_gateway
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./services/upload_gateway:/app
-    restart: always
-    env_file:
-      - ./services/upload_gateway/.env
-    depends_on:
-      - minio
-
   content_moderation:
     build: ./services/content_moderation
-    ports:
-      - "8001:8001"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # For non-Swarm mode, you can also add:
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./services/content_moderation:/app
+      - ./shared:/app/shared
+    restart: always
+    env_file:
+      - ./shared/env_templates/content_moderation.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   image_tagger:
     build: ./services/image_tagger
-    ports:
-      - "8002:8000"
     volumes:
       - ./services/image_tagger:/app
+      - ./shared:/app/shared
     restart: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    env_file:
+      - ./shared/env_templates/image_tagger.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   scene_recognition:
     build: ./services/scene_recognition
-    ports:
-      - "8003:8000"
     volumes:
       - ./services/scene_recognition:/app
+      - ./shared:/app/shared
     restart: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    env_file:
+      - ./shared/env_templates/scene_recognition.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   image_captioning:
     build: ./services/image_captioning
-    ports:
-      - "8004:8000"
     volumes:
       - ./services/image_captioning:/app
+      - ./shared:/app/shared
     restart: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  orchestrator:
-    build: ./services/orchestrator
-    ports:
-      - "8005:8005"
-    volumes:
-      - ./services/orchestrator:/app
     env_file:
-      - ./services/orchestrator/.env
+      - ./shared/env_templates/image_captioning.env
+    environment:
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - db
-      - content_moderation
-      - image_tagger
-      - scene_recognition
-      - image_captioning
+      - redis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  minio:
-    image: minio/minio:latest
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password123
-    command: server /data --console-address ":9001"
+  # text_embedding:
+  #   build: ./services/text_embedding
+  #   ports:
+  #     - "8008:8008"
+  #   volumes:
+  #     - ./services/text_embedding:/app
+  #   restart: always
+  #   environment:
+  #     - CLIP_MODEL_NAME=ViT-B-32
+  #     - CLIP_PRETRAINED=openai
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # minio:
+  #   image: minio/minio:latest
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   environment:
+  #     MINIO_ROOT_USER: admin
+  #     MINIO_ROOT_PASSWORD: password123
+  #   command: server /data --console-address ":9001"
+  #   volumes:
+  #     - minio_data:/data
+
+  # db:
+  #   image: pgvector/pgvector:pg15
+  #   environment:
+  #     POSTGRES_USER: kaleido
+  #     POSTGRES_PASSWORD: strongpass
+  #     POSTGRES_DB: kaleidoscope
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "8080:80"
+  #   depends_on:
+  #     - db
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin
+
+  face_recognition:
+    build: ./services/face_recognition
     volumes:
-      - minio_data:/data
-
-  db:
-    image: postgres:15
+      - ./services/face_recognition:/app
+      - ./shared:/app/shared
+    env_file:
+      - ./shared/env_templates/face_recognition.env
     environment:
-      POSTGRES_USER: kaleido
-      POSTGRES_PASSWORD: strongpass
-      POSTGRES_DB: kaleidoscope
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "8080:80"
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - db
+      - redis
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  post_aggregator:
+    build: ./services/post_aggregator
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      - ./services/post_aggregator:/app
+      - ./shared:/app/shared
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  es_sync:
+    build: ./services/es_sync
+    volumes:
+      - ./services/es_sync:/app
+      - ./shared:/app/shared
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - ES_HOST=http://elasticsearch:9200
+    depends_on:
+      - redis
+      - elasticsearch
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # search_service:
+  #   build: ./services/search_service
+  #   ports:
+  #     - "8007:8007"
+  #   volumes:
+  #     - ./services/search_service:/app
+  #     - ./shared:/app/shared
+  #   env_file:
+  #     - ./shared/env_templates/search_service.env
+  #   depends_on:
+  #     - elasticsearch
+  #   restart: always
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # collector:
+  #   build: ./services/collector
+  #   volumes:
+  #     - ./services/collector:/app
+  #     - ./shared:/app/shared
+  #   restart: always
+  #   depends_on:
+  #     - redis
+  #     - elasticsearch
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+  
+  # RabbitMQ removed - using Redis Streams instead
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  elasticsearch:
+    image: elasticsearch:8.10.2
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # kibana:
+  #   image: kibana:8.10.2
+  #   ports:
+  #     - "5601:5601"
+  #   depends_on:
+  #     - elasticsearch
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # logstash:
+  #   image: logstash:8.10.2
+  #   ports:
+  #     - "5044:5044"
+  #   depends_on:
+  #     - elasticsearch
+  #   volumes:
+  #     - ./logstash/pipeline:/usr/share/logstash/pipeline/
+  #   environment:
+  #     - xpack.monitoring.enabled=false
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
 
 volumes:
   pgdata:
   minio_data:
   pgadmin_data:
+  redis-data:
+  es-data:

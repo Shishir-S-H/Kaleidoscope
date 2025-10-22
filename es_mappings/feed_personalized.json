@@ -1,0 +1,47 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 2,
+      "number_of_replicas": 1
+    }
+  },
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "long"
+      },
+      "feed_item_id": {
+        "type": "keyword"
+      },
+      "target_user_id": {
+        "type": "long"
+      },
+      "media_id": {
+        "type": "long"
+      },
+      "media_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "caption": {
+        "type": "text",
+        "index": false
+      },
+      "uploader_id": {
+        "type": "long"
+      },
+      "uploader_username": {
+        "type": "keyword"
+      },
+      "combined_score": {
+        "type": "float"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "expires_at": {
+        "type": "date"
+      }
+    }
+  }
+}
