@@ -41,9 +41,9 @@ jobs:
           context: ./services/${{ matrix.service }}
           file: ./services/${{ matrix.service }}/Dockerfile
           push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest
-            ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:${{ github.sha }}
+          tags: 
+            - ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest
+            - ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
