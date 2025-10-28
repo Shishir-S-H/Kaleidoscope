@@ -117,6 +117,27 @@ echo "Full read of enriched stream (for verification):"
 docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS post-insights-enriched 0 | grep -A12 -E "77777|66666" || true
 
 echo ""
+echo -e "${BLUE}Step 10.1: Ensure Aggregator Group on Insights Stream${NC}"
+echo "Confirm insights exist for posts:"
+docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS ml-insights-results 0 | grep -A8 -E "77777|66666" || true
+
+echo "Check aggregator environment (STREAM/GROUP vars):"
+docker-compose exec post_aggregator env | grep -E "STREAM|GROUP|REDIS" || true
+
+echo "Create consumer group on ml-insights-results if missing:"
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE ml-insights-results post-aggregator-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XINFO GROUPS ml-insights-results || true
+
+echo "Restart post_aggregator to join group:"
+docker-compose restart post_aggregator
+sleep 3
+
+echo "Re-trigger aggregation and block read for enriched results:"
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 77777 action aggregate
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 66666 action aggregate
+docker exec -it kaleidoscope-redis-1 redis-cli XREAD BLOCK 20000 STREAMS post-insights-enriched $ || true
+
+echo ""
 echo -e "${BLUE}Step 11: Trigger Stream Status${NC}"
 docker exec kaleidoscope-redis-1 redis-cli XINFO STREAM post-aggregation-trigger | grep -E "length|entries|groups|last-generated-id" || true
 
