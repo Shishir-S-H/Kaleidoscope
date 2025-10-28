@@ -22,6 +22,7 @@ load_dotenv()
 from shared.utils.logger import get_logger
 from shared.redis_streams import RedisStreamPublisher, RedisStreamConsumer
 from shared.redis_streams.utils import decode_message
+import redis
 
 # Initialize logger
 LOGGER = get_logger("post-aggregator")
@@ -32,6 +33,8 @@ STREAM_INPUT = "post-aggregation-trigger"
 STREAM_OUTPUT = "post-insights-enriched"
 CONSUMER_GROUP = "post-aggregator-group"
 CONSUMER_NAME = "post-aggregator-worker-1"
+INSIGHTS_STREAM = "ml-insights-results"
+FACES_STREAM = "face-detection-results"
 
 # Event type detection patterns
 EVENT_PATTERNS = {
@@ -278,6 +281,31 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         
         # Parse media insights
         media_insights = json.loads(media_insights_str) if isinstance(media_insights_str, str) else media_insights_str
+
+        # If not provided in trigger, fetch from insight streams by postId
+        if not media_insights:
+            try:
+                r = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
+                collected: List[Dict[str, Any]] = []
+                for stream in (INSIGHTS_STREAM, FACES_STREAM):
+                    try:
+                        entries = r.xrange(stream, "-", "+", count=500)
+                    except Exception:
+                        continue
+                    for _, values in entries:
+                        post_val = values.get("postId") or values.get("post_id")
+                        if post_val == str(post_id):
+                            collected.append(values)
+                media_insights = collected
+                LOGGER.info("Fetched media insights from streams", extra={
+                    "post_id": post_id,
+                    "num_collected": len(media_insights)
+                })
+            except Exception as fetch_err:
+                LOGGER.error("Failed to fetch media insights from streams", extra={
+                    "error": str(fetch_err),
+                    "post_id": post_id
+                })
         
         LOGGER.info("Aggregating insights", extra={
             "post_id": post_id,
