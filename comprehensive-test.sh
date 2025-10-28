@@ -20,6 +20,23 @@ echo -e "${BLUE}Step 2: Check Recent Logs for Errors${NC}"
 docker-compose logs --tail=50 | grep -E "ERROR|error" | head -10 || echo "No errors found"
 
 echo ""
+echo -e "${BLUE}Step 2.5: Ensure Elasticsearch is Running${NC}"
+docker-compose up -d elasticsearch >/dev/null 2>&1 || true
+echo "Waiting for Elasticsearch to respond..."
+for i in {1..12}; do
+  if curl -sSf http://localhost:9200 >/dev/null 2>&1; then
+    echo "Elasticsearch is up"
+    break
+  fi
+  sleep 5
+done
+
+echo ""
+echo -e "${BLUE}Step 2.6: Ensure es_sync consumer group exists${NC}"
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE es-sync-queue es-sync-group $ MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XINFO GROUPS es-sync-queue || true
+
+echo ""
 echo -e "${BLUE}Step 3: Test Image Download (reliable source)${NC}"
 docker exec kaleidoscope-image_tagger-1 sh -c "apt-get update -qq >/dev/null 2>&1 && apt-get install -y curl -qq >/dev/null 2>&1 && curl -sSI 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png' | head -5" || echo "Download test skipped"
 
