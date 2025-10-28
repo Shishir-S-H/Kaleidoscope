@@ -61,6 +61,31 @@ echo "Post Insights Enriched Stream:"
 docker exec kaleidoscope-redis-1 redis-cli XINFO STREAM post-insights-enriched | grep -E "length|entries"
 
 echo ""
+echo -e "${BLUE}Step 10: Aggregator Logs & Re-trigger Aggregation${NC}"
+echo "Aggregator logs (recent, filtered by postIds 77777/66666):"
+docker-compose logs --tail=200 post_aggregator | grep -E "77777|66666" -n || true
+
+echo "Re-trigger aggregation for both posts:"
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 77777 action aggregate
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 66666 action aggregate
+sleep 3
+
+echo "Blocking read (up to 20s) for enriched results:"
+docker exec -it kaleidoscope-redis-1 redis-cli XREAD BLOCK 20000 STREAMS post-insights-enriched $ || true
+
+echo "Full read of enriched stream (for verification):"
+docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS post-insights-enriched 0 | grep -A12 -E "77777|66666" || true
+
+echo ""
+echo -e "${BLUE}Step 11: Trigger Stream Status${NC}"
+docker exec kaleidoscope-redis-1 redis-cli XINFO STREAM post-aggregation-trigger | grep -E "length|entries|groups|last-generated-id" || true
+
+echo ""
+echo -e "${BLUE}Step 12: Elasticsearch & es_sync Health${NC}"
+curl -s http://localhost:9200 | head -20 || true
+docker-compose logs --tail=100 es_sync | tail -50 || true
+
+echo ""
 echo -e "${GREEN}✅ Comprehensive Test Complete${NC}"
 echo ""
 echo "Connection details for backend team:"
