@@ -6,8 +6,8 @@
 [![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.10.2-005571?style=flat&logo=elasticsearch)](https://www.elastic.co/elasticsearch/)
 [![Redis](https://img.shields.io/badge/Redis-Streams-DC382D?style=flat&logo=redis)](https://redis.io/)
 
-**Status**: Production-Ready Core (70% Complete)  
-**Last Updated**: January 2025
+**Status**: Production-Ready Core  
+**Last Updated**: October 28, 2025
 
 ---
 
@@ -62,11 +62,11 @@ docker compose ps
 ### 2. Run Tests
 
 ```bash
-# Automated testing (5 minutes)
+# Automated smoke test
 python tests/test_end_to_end.py
 
-# Manual testing (15 minutes)
-# Follow: MANUAL_TESTING_GUIDE.md
+# Operational test script (runs on servers)
+./comprehensive-test.sh
 ```
 
 ### 3. Verify System
@@ -91,8 +91,9 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 | Document                                                                                 | Purpose                             | When to Use                                 |
 | ---------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------- |
 | **[docs/END_TO_END_PROJECT_DOCUMENTATION.md](docs/END_TO_END_PROJECT_DOCUMENTATION.md)** | Complete system documentation       | First time, architecture review, onboarding |
-| **[docs/MANUAL_TESTING_GUIDE.md](docs/MANUAL_TESTING_GUIDE.md)**                         | Step-by-step testing instructions   | Testing, debugging, learning                |
-| **[docs/TESTING_DOCUMENTATION_SUMMARY.md](docs/TESTING_DOCUMENTATION_SUMMARY.md)**       | Navigation guide                    | Finding specific information                |
+| **[DIGITALOCEAN_DEPLOYMENT_GUIDE.md](DIGITALOCEAN_DEPLOYMENT_GUIDE.md)**                 | Deploy to DigitalOcean              | Cloud deployment                            |
+| **[BACKEND_INTEGRATION_GUIDE.md](BACKEND_INTEGRATION_GUIDE.md)**                         | Integration with backend            | Backend teams                               |
+| **[docs/TESTING_DOCUMENTATION_SUMMARY.md](docs/TESTING_DOCUMENTATION_SUMMARY.md)**       | Testing doc map                     | Finding specific information                |
 | **[docs/ELASTICSEARCH_COMPLETE_SUMMARY.md](docs/ELASTICSEARCH_COMPLETE_SUMMARY.md)**     | Elasticsearch setup & configuration | ES setup, index management                  |
 
 ### Backend Integration
@@ -228,14 +229,7 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 python tests/test_end_to_end.py
 ```
 
-**Test Coverage**:
-
-- Infrastructure (4 tests)
-- Write Path (4 tests)
-- Read Path (5 tests)
-- Performance (1 test)
-
-**Total**: 14 automated tests (100% pass rate)
+Note: See `tests/` for unit/integration tests and `comprehensive-test.sh` for an end-to-end operational check on servers.
 
 ### Manual Testing
 
@@ -343,7 +337,7 @@ kaleidoscope-ai/
 
 ## 🚀 Next Steps
 
-### Immediate (This Week)
+### Immediate
 
 1. **Share with Backend Team**:
 
@@ -356,7 +350,7 @@ kaleidoscope-ai/
    - Implement sync triggers
    - Add Redis Stream consumers
 
-### Short Term (2-4 Weeks)
+### Short Term
 
 1. **Integration Testing**:
 
@@ -369,7 +363,7 @@ kaleidoscope-ai/
    - Monitoring setup
    - Deployment planning
 
-### Long Term (1-3 Months)
+### Long Term
 
 1. **Advanced Features**:
 
@@ -465,5 +459,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Elasticsearch](https://www.elastic.co/elasticsearch/) for powerful search capabilities
 - [Redis](https://redis.io/) for reliable message streaming
 - [Docker](https://www.docker.com/) for containerization
-#   G i t H u b   A c t i o n s   T e s t  
- 

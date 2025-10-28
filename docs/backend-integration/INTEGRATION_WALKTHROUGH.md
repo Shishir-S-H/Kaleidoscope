@@ -328,11 +328,10 @@ public class RedisStreamPublisher {
     public void publishImageProcessingJob(ImageProcessingJob job) {
         try {
             Map<String, Object> message = Map.of(
-                "jobId", job.getJobId(),
                 "postId", job.getPostId(),
                 "mediaId", job.getMediaId(),
-                "userId", job.getUserId(),
-                "imageUrl", job.getImageUrl(),
+                "mediaUrl", job.getMediaUrl(),
+                "uploaderId", job.getUploaderId(),
                 "timestamp", System.currentTimeMillis()
             );
             
@@ -506,11 +505,10 @@ public class MLInsightsConsumer {
 @NoArgsConstructor
 @AllArgsConstructor
 public class ImageProcessingJob {
-    private String jobId;
     private UUID postId;
     private UUID mediaId;
-    private UUID userId;
-    private String imageUrl;
+    private UUID uploaderId;
+    private String mediaUrl;
     private Long timestamp;
 }
 
@@ -842,11 +840,10 @@ public class SearchService {
 public void testImageProcessingFlow() {
     // Create test image processing job
     ImageProcessingJob job = new ImageProcessingJob();
-    job.setJobId("test-job-1");
     job.setPostId(UUID.randomUUID());
     job.setMediaId(UUID.randomUUID());
-    job.setUserId(UUID.randomUUID());
-    job.setImageUrl("https://example.com/test-image.jpg");
+    job.setUploaderId(UUID.randomUUID());
+    job.setMediaUrl("https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png");
     
     // Publish job
     redisStreamPublisher.publishImageProcessingJob(job);

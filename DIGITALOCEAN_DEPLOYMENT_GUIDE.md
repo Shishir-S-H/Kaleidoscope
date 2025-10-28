@@ -1,6 +1,7 @@
 # DigitalOcean Deployment Guide
 
 ## Prerequisites
+
 - ✅ GitHub Student Pack credits claimed
 - ✅ DigitalOcean account created
 - ✅ Docker images built and pushed to Docker Hub
@@ -15,14 +16,16 @@
 
 ## Step 2: Create DigitalOcean Droplet
 
-### Recommended Configuration:
+### Recommended Configuration (tested):
+
 - **Image:** Ubuntu 22.04 LTS
-- **Size:** Basic plan, $12/month (2GB RAM, 1 CPU, 50GB SSD)
+- **Size:** Basic plan, $24/month (4GB RAM, 2 CPU, 80GB SSD)
 - **Region:** Choose closest to your users
 - **Authentication:** SSH Key (recommended)
 - **Hostname:** `kaleidoscope-ai`
 
 ### Steps:
+
 1. Go to: https://cloud.digitalocean.com/droplets/new
 2. Select Ubuntu 22.04 LTS
 3. Choose Basic plan, $12/month option
@@ -33,11 +36,13 @@
 ## Step 3: Connect to Your Droplet
 
 ### Using SSH:
+
 ```bash
 ssh root@YOUR_DROPLET_IP
 ```
 
 ### Using Password:
+
 ```bash
 ssh root@YOUR_DROPLET_IP
 # Enter password when prompted
@@ -46,11 +51,13 @@ ssh root@YOUR_DROPLET_IP
 ## Step 4: Install Required Software
 
 ### Update System:
+
 ```bash
 apt update && apt upgrade -y
 ```
 
 ### Install Docker:
+
 ```bash
 curl -fsSL https://get.docker.com -o get-docker.sh
 sh get-docker.sh
@@ -59,12 +66,14 @@ systemctl enable docker
 ```
 
 ### Install Docker Compose:
+
 ```bash
 curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 ```
 
 ### Install Git:
+
 ```bash
 apt install git -y
 ```
@@ -72,18 +81,22 @@ apt install git -y
 ## Step 5: Deploy Kaleidoscope AI
 
 ### Clone Repository:
+
 ```bash
 git clone https://github.com/Shishir-S-H/Kaleidoscope.git
-cd Kaleidoscope/kaleidoscope-ai
+cd Kaleidoscope
+cd kaleidoscope-ai
 ```
 
 ### Create Environment File:
+
 ```bash
 cp .env.example .env
 nano .env
 ```
 
 ### Edit Environment Variables:
+
 ```bash
 # HuggingFace API Configuration
 HF_API_TOKEN=your_huggingface_token_here
@@ -98,53 +111,55 @@ ES_HOST=http://localhost:9200
 LOG_LEVEL=INFO
 ```
 
-### Deploy Services:
+### Deploy Services (tested paths):
+
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+# Option A: build and run locally on droplet (recommended)
+docker-compose -f docker-compose.yml up -d
+
+# Option B: use prebuilt images (requires pushing to Docker Hub and setting DOCKER_USERNAME)
+# docker-compose -f docker-compose.prod.yml up -d
 ```
 
 ## Step 6: Verify Deployment
 
 ### Check Service Status:
+
 ```bash
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.yml ps
 ```
 
 ### Check Logs:
+
 ```bash
-docker-compose -f docker-compose.prod.yml logs -f
+docker-compose -f docker-compose.yml logs -f
 ```
 
 ### Test Services:
+
 ```bash
 # Test Redis
-docker exec -it kaleidoscope-ai-redis-1 redis-cli ping
+docker exec kaleidoscope-redis-1 redis-cli ping
 
 # Test Elasticsearch
 curl http://localhost:9200
 
-# Test AI Services
-curl http://localhost:8001/health  # Content Moderation
-curl http://localhost:8002/health  # Image Tagger
-curl http://localhost:8003/health  # Scene Recognition
-curl http://localhost:8004/health  # Image Captioning
-curl http://localhost:8005/health  # Face Recognition
-curl http://localhost:8006/health  # Post Aggregator
-curl http://localhost:8007/health  # ES Sync
+# Optional health endpoints vary by service; prefer stream tests below
+```
+
+### Run the Comprehensive Test Script (added to repo)
+
+```bash
+chmod +x comprehensive-test.sh
+./comprehensive-test.sh
 ```
 
 ## Step 7: Configure Firewall
 
 ### Allow Required Ports:
+
 ```bash
 ufw allow 22    # SSH
-ufw allow 8001  # Content Moderation
-ufw allow 8002  # Image Tagger
-ufw allow 8003  # Scene Recognition
-ufw allow 8004  # Image Captioning
-ufw allow 8005  # Face Recognition
-ufw allow 8006  # Post Aggregator
-ufw allow 8007  # ES Sync
 ufw allow 9200  # Elasticsearch
 ufw enable
 ```
@@ -152,11 +167,13 @@ ufw enable
 ## Step 8: Set Up Monitoring
 
 ### Install htop for monitoring:
+
 ```bash
 apt install htop -y
 ```
 
 ### Monitor Resources:
+
 ```bash
 htop
 ```
@@ -164,15 +181,32 @@ htop
 ## Troubleshooting
 
 ### If services fail to start:
+
 ```bash
-docker-compose -f docker-compose.prod.yml logs [service-name]
+docker-compose -f docker-compose.yml logs [service-name]
 ```
 
-### If out of memory:
-- Upgrade to larger droplet
-- Or reduce resource limits in docker-compose.prod.yml
+### Elasticsearch OOM (exit code 137):
+
+- Use a 4GB droplet (recommended) or add swap
+- Cap heap: `ES_JAVA_OPTS=-Xms1g -Xmx1g` and restart only `elasticsearch`
+
+### Redis Streams consumer group missing (NOGROUP):
+
+```bash
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE es-sync-queue es-sync-group $ MKSTREAM
+```
+
+### BLOCK $ returns (nil) when testing streams:
+
+- You started blocking after publication. Use `XRANGE`/`XREVRANGE` to read existing entries or start blocking before the trigger.
+
+### Image downloads fail (HTTP 521/403):
+
+- Use reliable URLs (GitHub asset, Wikimedia). Avoid flaky sources during outages.
 
 ### If ports are blocked:
+
 ```bash
 ufw status
 ufw allow [port]
@@ -195,6 +229,7 @@ ufw allow [port]
 ## Support
 
 If you encounter issues:
+
 1. Check service logs
 2. Verify environment variables
 3. Check firewall settings

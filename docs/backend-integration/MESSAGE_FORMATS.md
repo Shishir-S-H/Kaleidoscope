@@ -31,32 +31,30 @@ Backend → es-sync-queue → ES Sync Service
 
 ```json
 {
-  "jobId": "string",
-  "postId": "uuid",
-  "mediaId": "uuid", 
-  "userId": "uuid",
-  "imageUrl": "string",
-  "timestamp": "long"
+  "postId": "string|number",
+  "mediaId": "string|number",
+  "mediaUrl": "string",
+  "uploaderId": "string|number",
+  "timestamp": "long (optional)"
 }
 ```
 
 **Field Descriptions**:
-- `jobId`: Unique identifier for this processing job
+
 - `postId`: ID of the post containing this image
 - `mediaId`: ID of the specific media/image
-- `userId`: ID of the user who uploaded the image
-- `imageUrl`: URL to the image file (must be accessible by AI services)
-- `timestamp`: Unix timestamp in milliseconds
+- `mediaUrl`: Publicly reachable URL to the image (hotlink-friendly)
+- `uploaderId`: ID of the user who uploaded the image
+- `timestamp`: Unix timestamp in milliseconds (optional)
 
 **Example**:
+
 ```json
 {
-  "jobId": "job_2025_01_21_001",
-  "postId": "550e8400-e29b-41d4-a716-446655440000",
-  "mediaId": "550e8400-e29b-41d4-a716-446655440001",
-  "userId": "550e8400-e29b-41d4-a716-446655440002",
-  "imageUrl": "https://your-cdn.com/images/beach-sunset.jpg",
-  "timestamp": 1737504000000
+  "postId": 90001,
+  "mediaId": 70001,
+  "mediaUrl": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+  "uploaderId": 101
 }
 ```
 
@@ -71,56 +69,36 @@ Backend → es-sync-queue → ES Sync Service
 
 ```json
 {
-  "jobId": "string",
-  "postId": "uuid",
-  "mediaId": "uuid",
-  "userId": "uuid",
-  "serviceType": "string",
-  "results": {
-    "contentModeration": {
-      "isSafe": "boolean",
-      "confidence": "float"
-    },
-    "imageTagging": {
-      "tags": ["string"],
-      "confidences": ["float"]
-    },
-    "sceneRecognition": {
-      "scenes": ["string"],
-      "confidences": ["float"]
-    },
-    "imageCaptioning": {
-      "caption": "string",
-      "confidence": "float"
-    }
-  },
-  "timestamp": "long"
+  "postId": "string|number",
+  "mediaId": "string|number",
+  "service": "moderation" | "tagging" | "scene_recognition" | "captioning",
+  "isSafe": true,                   // moderation
+  "moderationConfidence": 0.43,     // moderation
+  "tags": ["tag1", "tag2"],       // tagging
+  "scenes": ["indoor"],           // scene_recognition
+  "caption": "...",               // captioning
+  "timestamp": "long (optional)"
 }
 ```
 
 **Field Descriptions**:
-- `jobId`: Original job ID from image processing
-- `postId`: ID of the post containing this image
-- `mediaId`: ID of the specific media/image
-- `userId`: ID of the user who uploaded the image
-- `serviceType`: Type of AI service ("content_moderation", "image_tagger", "scene_recognition", "image_captioning")
-- `results`: AI analysis results (only relevant fields populated based on serviceType)
-- `timestamp`: Unix timestamp in milliseconds
+
+- `postId`, `mediaId`: IDs used to join insights
+- `service`: AI service that produced this result
+- `isSafe`, `moderationConfidence`: moderation-only fields
+- `tags`: array of strings (tagger)
+- `scenes`: array of strings (scene)
+- `caption`: string (captioning)
+- `timestamp`: Unix timestamp in milliseconds (optional)
 
 **Example**:
+
 ```json
 {
-  "jobId": "job_2025_01_21_001",
-  "postId": "550e8400-e29b-41d4-a716-446655440000",
-  "mediaId": "550e8400-e29b-41d4-a716-446655440001",
-  "userId": "550e8400-e29b-41d4-a716-446655440002",
-  "serviceType": "image_tagger",
-  "results": {
-    "imageTagging": {
-      "tags": ["beach", "sunset", "ocean", "sky"],
-      "confidences": [0.95, 0.89, 0.92, 0.87]
-    }
-  },
+  "postId": 90001,
+  "mediaId": 70001,
+  "service": "tagging",
+  "tags": ["logo"],
   "timestamp": 1737504030000
 }
 ```
@@ -128,27 +106,27 @@ Backend → es-sync-queue → ES Sync Service
 ### 2. Face Detection Results
 
 **Stream**: `face-detection-results`  
-**Purpose**: Face detection and recognition results
+**Purpose**: Face detection results
 
 ```json
 {
-  "jobId": "string",
-  "postId": "uuid",
-  "mediaId": "uuid",
-  "userId": "uuid",
+  "postId": "string|number",
+  "mediaId": "string|number",
+  "facesDetected": 0,
   "faces": [
     {
-      "faceId": "string",
-      "boundingBox": [float, float, float, float],
-      "embedding": [float, ...],
-      "confidence": "float"
+      "faceId": 0,
+      "bbox": "[x1,y1,x2,y2]",
+      "embedding": "[...floats...]",
+      "confidence": "1.0"
     }
   ],
-  "timestamp": "long"
+  "timestamp": "long (optional)"
 }
 ```
 
 **Field Descriptions**:
+
 - `jobId`: Original job ID from image processing
 - `postId`: ID of the post containing this image
 - `mediaId`: ID of the specific media/image
@@ -161,6 +139,7 @@ Backend → es-sync-queue → ES Sync Service
 - `timestamp`: Unix timestamp in milliseconds
 
 **Example**:
+
 ```json
 {
   "jobId": "job_2025_01_21_001",
@@ -186,40 +165,32 @@ Backend → es-sync-queue → ES Sync Service
 
 ```json
 {
-  "postId": "uuid",
-  "userId": "uuid",
+  "postId": "string|number",
+  "mediaCount": 10,
   "aggregatedTags": ["string"],
-  "eventType": "string",
-  "totalMediaCount": "integer",
-  "totalFaceCount": "integer",
-  "isSafe": "boolean",
-  "mediaInsights": [
-    {
-      "mediaId": "uuid",
-      "caption": "string",
-      "tags": ["string"],
-      "scenes": ["string"],
-      "isSafe": "boolean",
-      "confidenceScore": "float",
-      "faceCount": "integer"
-    }
-  ],
-  "timestamp": "long"
+  "aggregatedScenes": ["string"],
+  "totalFaces": 0,
+  "isSafe": true,
+  "moderationConfidence": 0.3159,
+  "eventType": "general",
+  "combinedCaption": "...",
+  "hasMultipleImages": true,
+  "timestamp": "long (optional)"
 }
 ```
 
 **Field Descriptions**:
+
 - `postId`: ID of the post
-- `userId`: ID of the user who created the post
-- `aggregatedTags`: Combined tags from all media in the post
-- `eventType`: Detected event type ("team_outing", "birthday_party", "conference", etc.)
-- `totalMediaCount`: Total number of media items in the post
-- `totalFaceCount`: Total number of faces across all media
-- `isSafe`: Overall safety status (true if all media are safe)
-- `mediaInsights`: Detailed insights for each media item
-- `timestamp`: Unix timestamp in milliseconds
+- `mediaCount`: Count of media insights collected for this post
+- `aggregatedTags`, `aggregatedScenes`: Combined tag/scene lists
+- `totalFaces`: Sum of face counts
+- `isSafe`, `moderationConfidence`: Post-level safety summary
+- `eventType`, `combinedCaption`, `hasMultipleImages`
+- `timestamp`: Unix timestamp in milliseconds (optional)
 
 **Example**:
+
 ```json
 {
   "postId": "550e8400-e29b-41d4-a716-446655440000",
@@ -258,12 +229,13 @@ Backend → es-sync-queue → ES Sync Service
   "tableName": "string",
   "operation": "string",
   "recordId": "string",
-  "data": "object",
+  "data": { "...": "..." },
   "timestamp": "long"
 }
 ```
 
 **Field Descriptions**:
+
 - `tableName`: Name of the read model table that changed
 - `operation`: Type of operation ("INSERT", "UPDATE", "DELETE")
 - `recordId`: ID of the record that changed
@@ -271,6 +243,7 @@ Backend → es-sync-queue → ES Sync Service
 - `timestamp`: Unix timestamp in milliseconds
 
 **Example**:
+
 ```json
 {
   "tableName": "media_search_read_model",
@@ -303,10 +276,10 @@ Backend → es-sync-queue → ES Sync Service
 ```java
 @Component
 public class RedisStreamPublisher {
-    
+
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
-    
+
     public void publishImageProcessingJob(ImageProcessingJob job) {
         Map<String, Object> message = Map.of(
             "jobId", job.getJobId(),
@@ -316,7 +289,7 @@ public class RedisStreamPublisher {
             "imageUrl", job.getImageUrl(),
             "timestamp", System.currentTimeMillis()
         );
-        
+
         redisTemplate.opsForStream().add("post-image-processing", message);
     }
 }
@@ -327,7 +300,7 @@ public class RedisStreamPublisher {
 ```java
 @Component
 public class MLInsightsConsumer {
-    
+
     @StreamListener(target = "ml-insights-results")
     public void handleMLInsights(Map<String, Object> message) {
         String jobId = (String) message.get("jobId");
@@ -335,10 +308,10 @@ public class MLInsightsConsumer {
         String mediaId = (String) message.get("mediaId");
         String userId = (String) message.get("userId");
         String serviceType = (String) message.get("serviceType");
-        
+
         @SuppressWarnings("unchecked")
         Map<String, Object> results = (Map<String, Object>) message.get("results");
-        
+
         // Process the results
         processMLInsights(jobId, postId, mediaId, userId, serviceType, results);
     }
@@ -353,17 +326,17 @@ import json
 
 def consume_messages():
     r = redis.Redis(host='localhost', port=6379, db=0)
-    
+
     while True:
         messages = r.xread({
             'ml-insights-results': '$'
         }, count=1, block=1000)
-        
+
         for stream, msgs in messages:
             for msg_id, fields in msgs:
                 # Decode message
                 message = {k.decode(): v.decode() for k, v in fields.items()}
-                
+
                 # Process message
                 process_message(message)
 ```
@@ -375,28 +348,23 @@ def consume_messages():
 ### Test Image Processing Job
 
 ```bash
-# Publish test message
+# Publish test message (camelCase)
 redis-cli XADD post-image-processing "*" \
-  jobId "test-job-001" \
-  postId "550e8400-e29b-41d4-a716-446655440000" \
-  mediaId "550e8400-e29b-41d4-a716-446655440001" \
-  userId "550e8400-e29b-41d4-a716-446655440002" \
-  imageUrl "https://example.com/test-image.jpg" \
-  timestamp "1737504000000"
+  postId 90001 \
+  mediaId 70001 \
+  mediaUrl "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" \
+  uploaderId 101
 ```
 
 ### Test ML Insights Result
 
 ```bash
-# Publish test result
+# Publish test result (example tagging)
 redis-cli XADD ml-insights-results "*" \
-  jobId "test-job-001" \
-  postId "550e8400-e29b-41d4-a716-446655440000" \
-  mediaId "550e8400-e29b-41d4-a716-446655440001" \
-  userId "550e8400-e29b-41d4-a716-446655440002" \
-  serviceType "image_tagger" \
-  results '{"imageTagging":{"tags":["beach","sunset"],"confidences":[0.95,0.89]}}' \
-  timestamp "1737504030000"
+  postId 90001 \
+  mediaId 70001 \
+  service tagging \
+  tags '[]'
 ```
 
 ### Verify Messages
@@ -421,6 +389,7 @@ redis-cli XREAD STREAMS post-image-processing $
 Each message type has required fields that must be present:
 
 **Image Processing Job**:
+
 - ✅ jobId (string)
 - ✅ postId (uuid)
 - ✅ mediaId (uuid)
@@ -429,6 +398,7 @@ Each message type has required fields that must be present:
 - ✅ timestamp (long)
 
 **ML Insights Results**:
+
 - ✅ jobId (string)
 - ✅ postId (uuid)
 - ✅ mediaId (uuid)
@@ -438,6 +408,7 @@ Each message type has required fields that must be present:
 - ✅ timestamp (long)
 
 **Face Detection Results**:
+
 - ✅ jobId (string)
 - ✅ postId (uuid)
 - ✅ mediaId (uuid)
@@ -446,6 +417,7 @@ Each message type has required fields that must be present:
 - ✅ timestamp (long)
 
 **Post Insights Enriched**:
+
 - ✅ postId (uuid)
 - ✅ userId (uuid)
 - ✅ aggregatedTags (array)
@@ -457,6 +429,7 @@ Each message type has required fields that must be present:
 - ✅ timestamp (long)
 
 **ES Sync Queue**:
+
 - ✅ tableName (string)
 - ✅ operation (string)
 - ✅ recordId (string)
@@ -470,11 +443,13 @@ Each message type has required fields that must be present:
 ### Common Issues
 
 1. **Message Not Published**
+
    - Check Redis connection
    - Verify stream name
    - Check message format
 
 2. **Message Not Consumed**
+
    - Check consumer configuration
    - Verify stream exists
    - Check consumer group
@@ -490,14 +465,14 @@ Each message type has required fields that must be present:
 # Check Redis connection
 redis-cli ping
 
-# List all streams
-redis-cli XINFO STREAMS
-
 # Check stream info
 redis-cli XINFO STREAM post-image-processing
+redis-cli XINFO STREAM ml-insights-results
+redis-cli XINFO STREAM post-insights-enriched
 
 # Check consumer groups
 redis-cli XINFO GROUPS post-image-processing
+redis-cli XINFO GROUPS ml-insights-results
 ```
 
 ---
@@ -505,16 +480,19 @@ redis-cli XINFO GROUPS post-image-processing
 ## 📈 Performance Considerations
 
 ### Message Size
+
 - Keep messages under 1MB
 - Use efficient JSON serialization
 - Consider compression for large payloads
 
 ### Throughput
+
 - Use connection pooling
 - Implement batch processing
 - Monitor memory usage
 
 ### Reliability
+
 - Implement retry logic
 - Use consumer groups
 - Monitor failed messages
