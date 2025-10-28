@@ -20,31 +20,34 @@ echo -e "${BLUE}Step 2: Check Recent Logs for Errors${NC}"
 docker-compose logs --tail=50 | grep -E "ERROR|error" | head -10 || echo "No errors found"
 
 echo ""
-echo -e "${BLUE}Step 3: Test Image Download from Wikimedia${NC}"
-docker exec kaleidoscope-image_tagger-1 sh -c "apt-get update -qq >/dev/null 2>&1 && apt-get install -y curl -qq >/dev/null 2>&1 && curl -sSI 'https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg' | head -5" || echo "Wikimedia download test skipped"
+echo -e "${BLUE}Step 3: Test Image Download (reliable source)${NC}"
+docker exec kaleidoscope-image_tagger-1 sh -c "apt-get update -qq >/dev/null 2>&1 && apt-get install -y curl -qq >/dev/null 2>&1 && curl -sSI 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png' | head -5" || echo "Download test skipped"
 
 echo ""
 echo -e "${BLUE}Step 4: Sending Test Images${NC}"
-docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 99999 postId 99999 mediaUrl "https://placekitten.com/640/360" uploaderId 101
-echo "Test image sent (mediaId: 99999), waiting 45 seconds for processing..."
-sleep 45
+# Reliable images
+docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 77777 postId 77777 mediaUrl "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" uploaderId 101
+docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 66666 postId 66666 mediaUrl "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png" uploaderId 101
+echo "Test images sent (mediaId: 77777, 66666), waiting 60 seconds for processing..."
+sleep 60
 
 echo ""
 echo -e "${BLUE}Step 5: Checking ML Insights Results${NC}"
-docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS ml-insights-results 0 | grep -A12 "99999" || echo "No results found for mediaId 99999"
+docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS ml-insights-results 0 | grep -A12 -E "77777|66666" || echo "No results found for mediaId 77777/66666"
 
 echo ""
 echo -e "${BLUE}Step 6: Checking Face Detection Results${NC}"
-docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS face-detection-results 0 | grep -A12 "99999" || echo "No face detection results for mediaId 99999"
+docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS face-detection-results 0 | grep -A12 -E "77777|66666" || echo "No face detection results for mediaId 77777/66666"
 
 echo ""
 echo -e "${BLUE}Step 7: Trigger Post Aggregation${NC}"
-docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 99999 action aggregate
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 77777 action aggregate
+docker exec kaleidoscope-redis-1 redis-cli XADD post-aggregation-trigger "*" postId 66666 action aggregate
 sleep 5
 
 echo ""
 echo -e "${BLUE}Step 8: Check Post Aggregation Results${NC}"
-docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS post-insights-enriched 0 | grep -A12 "99999"
+docker exec kaleidoscope-redis-1 redis-cli XREAD STREAMS post-insights-enriched 0 | grep -A12 -E "77777|66666"
 
 echo ""
 echo -e "${BLUE}Step 9: Stream Statistics${NC}"
