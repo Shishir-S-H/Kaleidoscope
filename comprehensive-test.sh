@@ -37,6 +37,18 @@ docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE es-sync-queue es-sync-g
 docker exec kaleidoscope-redis-1 redis-cli XINFO GROUPS es-sync-queue || true
 
 echo ""
+echo -e "${BLUE}Step 2.7: Baseline Resource Usage${NC}"
+echo "=== System Resources (Before Load) ==="
+echo "Memory Usage:"
+free -h
+echo ""
+echo "Disk Usage:"
+df -h | grep -E "/$|/var"
+echo ""
+echo "Docker Container Resource Usage:"
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep kaleidoscope || true
+
+echo ""
 echo -e "${BLUE}Step 3: Test Image Download (reliable source)${NC}"
 docker exec kaleidoscope-image_tagger-1 sh -c "apt-get update -qq >/dev/null 2>&1 && apt-get install -y curl -qq >/dev/null 2>&1 && curl -sSI 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png' | head -5" || echo "Download test skipped"
 
@@ -46,7 +58,18 @@ echo -e "${BLUE}Step 4: Sending Test Images${NC}"
 docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 77777 postId 77777 mediaUrl "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" uploaderId 101
 docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 66666 postId 66666 mediaUrl "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png" uploaderId 101
 echo "Test images sent (mediaId: 77777, 66666), waiting 60 seconds for processing..."
-sleep 60
+
+echo ""
+echo -e "${BLUE}Step 4.5: Resource Usage During Processing${NC}"
+echo "=== Resource Monitoring (During Load) ==="
+for i in {1..12}; do
+  echo "Check $i/12 - $(date '+%H:%M:%S')"
+  echo "Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+  echo "Docker Memory:"
+  docker stats --no-stream --format "{{.Container}}: {{.MemUsage}}" | grep kaleidoscope | head -5
+  echo "---"
+  sleep 5
+done
 
 echo ""
 echo -e "${BLUE}Step 5: Checking ML Insights Results${NC}"
@@ -101,6 +124,33 @@ echo ""
 echo -e "${BLUE}Step 12: Elasticsearch & es_sync Health${NC}"
 curl -s http://localhost:9200 | head -20 || true
 docker-compose logs --tail=100 es_sync | tail -50 || true
+
+echo ""
+echo -e "${BLUE}Step 13: Final Resource Usage Analysis${NC}"
+echo "=== System Resources (After Load) ==="
+echo "Memory Usage:"
+free -h
+echo ""
+echo "Disk Usage:"
+df -h | grep -E "/$|/var"
+echo ""
+echo "Docker Container Resource Usage:"
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep kaleidoscope || true
+
+echo ""
+echo -e "${BLUE}Step 14: Resource Usage Summary${NC}"
+echo "=== Peak Load Analysis ==="
+echo "System Memory:"
+echo "- Total: $(free -h | grep Mem | awk '{print $2}')"
+echo "- Used: $(free -h | grep Mem | awk '{print $3}')"
+echo "- Available: $(free -h | grep Mem | awk '{print $7}')"
+echo "- Usage %: $(free | grep Mem | awk '{printf "%.1f%%", $3/$2 * 100.0}')"
+echo ""
+echo "Docker Memory Usage:"
+docker stats --no-stream --format "{{.Container}}: {{.MemUsage}} ({{.MemPerc}})" | grep kaleidoscope | sort -k3 -hr || true
+echo ""
+echo "Disk Space:"
+df -h | grep -E "/$|/var" | awk '{print $1 ": " $3 "/" $2 " (" $5 " used)"}'
 
 echo ""
 echo -e "${GREEN}✅ Comprehensive Test Complete${NC}"
