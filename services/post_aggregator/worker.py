@@ -153,12 +153,14 @@ class PostAggregator:
         # Build aggregation result
         return {
             "mediaCount": len(media_insights),
-            "aggregatedTags": top_tags,
-            "aggregatedScenes": top_scenes,
+            "allAiTags": all_tags,  # Raw collected tags before aggregation
+            "allAiScenes": all_scenes,  # Raw collected scenes before aggregation
+            "aggregatedTags": top_tags,  # Top tags after aggregation
+            "aggregatedScenes": top_scenes,  # Top scenes after aggregation
             "totalFaces": total_faces,
             "isSafe": is_safe,
             "moderationConfidence": min_moderation_confidence,
-            "eventType": event_type,
+            "inferredEventType": event_type,  # Renamed from eventType
             "combinedCaption": combined_caption,
             "hasMultipleImages": len(media_insights) > 1
         }
@@ -244,12 +246,14 @@ class PostAggregator:
         """Return empty aggregation result."""
         return {
             "mediaCount": 0,
+            "allAiTags": [],  # Raw collected tags
+            "allAiScenes": [],  # Raw collected scenes
             "aggregatedTags": [],
             "aggregatedScenes": [],
             "totalFaces": 0,
             "isSafe": True,
             "moderationConfidence": 1.0,
-            "eventType": "general",
+            "inferredEventType": "general",  # Renamed from eventType
             "combinedCaption": "",
             "hasMultipleImages": False
         }
@@ -318,7 +322,7 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         
         LOGGER.info("Aggregation complete", extra={
             "post_id": post_id,
-            "event_type": aggregated["eventType"],
+            "event_type": aggregated["inferredEventType"],
             "total_faces": aggregated["totalFaces"],
             "tag_count": len(aggregated["aggregatedTags"])
         })
@@ -327,12 +331,14 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         result_message = {
             "postId": str(post_id),
             "mediaCount": str(aggregated["mediaCount"]),
+            "allAiTags": json.dumps(aggregated["allAiTags"]),  # Raw collected tags
+            "allAiScenes": json.dumps(aggregated["allAiScenes"]),  # Raw collected scenes
             "aggregatedTags": json.dumps(aggregated["aggregatedTags"]),
             "aggregatedScenes": json.dumps(aggregated["aggregatedScenes"]),
             "totalFaces": str(aggregated["totalFaces"]),
             "isSafe": "true" if aggregated["isSafe"] else "false",
             "moderationConfidence": str(aggregated["moderationConfidence"]),
-            "eventType": aggregated["eventType"],
+            "inferredEventType": aggregated["inferredEventType"],  # Renamed from eventType
             "combinedCaption": aggregated["combinedCaption"],
             "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false",
             "timestamp": datetime.utcnow().isoformat() + "Z"
