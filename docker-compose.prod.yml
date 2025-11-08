@@ -1,9 +1,9 @@
 # Production Docker Compose - Cloud Optimized
-# No development volume mounts, uses pre-built images
+# Builds images locally (no volume mounts for production)
 
 services:
   content_moderation:
-    image: ${DOCKER_USERNAME}/kaleidoscope-content-moderation:latest
+    build: ./services/content_moderation
     container_name: content_moderation
     restart: always
     environment:
@@ -20,7 +20,7 @@ services:
           memory: 512M
 
   image_tagger:
-    image: ${DOCKER_USERNAME}/kaleidoscope-image-tagger:latest
+    build: ./services/image_tagger
     container_name: image_tagger
     restart: always
     environment:
@@ -37,7 +37,7 @@ services:
           memory: 512M
 
   scene_recognition:
-    image: ${DOCKER_USERNAME}/kaleidoscope-scene-recognition:latest
+    build: ./services/scene_recognition
     container_name: scene_recognition
     restart: always
     environment:
@@ -54,7 +54,7 @@ services:
           memory: 512M
 
   image_captioning:
-    image: ${DOCKER_USERNAME}/kaleidoscope-image-captioning:latest
+    build: ./services/image_captioning
     container_name: image_captioning
     restart: always
     environment:
@@ -71,7 +71,7 @@ services:
           memory: 512M
 
   face_recognition:
-    image: ${DOCKER_USERNAME}/kaleidoscope-face-recognition:latest
+    build: ./services/face_recognition
     container_name: face_recognition
     restart: always
     environment:
@@ -88,7 +88,7 @@ services:
           memory: 512M
 
   post_aggregator:
-    image: ${DOCKER_USERNAME}/kaleidoscope-post-aggregator:latest
+    build: ./services/post_aggregator
     container_name: post_aggregator
     restart: always
     environment:
@@ -104,7 +104,7 @@ services:
           memory: 512M
 
   es_sync:
-    image: ${DOCKER_USERNAME}/kaleidoscope-es-sync:latest
+    build: ./services/es_sync
     container_name: es_sync
     restart: always
     environment:
