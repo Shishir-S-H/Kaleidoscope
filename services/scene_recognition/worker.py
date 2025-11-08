@@ -146,12 +146,14 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         media_id = int(decoded_data.get("mediaId", 0))
         post_id = int(decoded_data.get("postId", 0))
         media_url = decoded_data.get("mediaUrl", "")
+        correlation_id = decoded_data.get("correlationId", "")  # Extract correlationId for log tracing
         
         LOGGER.info("Received scene recognition job", extra={
             "message_id": message_id,
             "media_id": media_id,
             "post_id": post_id,
-            "media_url": media_url
+            "media_url": media_url,
+            "correlation_id": correlation_id
         })
         
         if not media_id or not media_url:
@@ -159,19 +161,20 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             return
         
         # Download image from URL
-        LOGGER.info("Downloading image", extra={"media_id": media_id, "media_url": media_url})
+        LOGGER.info("Downloading image", extra={"media_id": media_id, "media_url": media_url, "correlation_id": correlation_id})
         response = requests.get(media_url, timeout=30)
         response.raise_for_status()
         image_bytes = response.content
-        LOGGER.info("Image downloaded successfully", extra={"media_id": media_id})
+        LOGGER.info("Image downloaded successfully", extra={"media_id": media_id, "correlation_id": correlation_id})
         
         # Run scene recognition via Hugging Face API
-        LOGGER.info("Running scene recognition", extra={"media_id": media_id})
+        LOGGER.info("Running scene recognition", extra={"media_id": media_id, "correlation_id": correlation_id})
         scene_result = process_scene_recognition(image_bytes)
         LOGGER.info("Scene recognition complete", extra={
             "media_id": media_id,
             "scene": scene_result['scene'],
-            "confidence": scene_result['confidence']
+            "confidence": scene_result['confidence'],
+            "correlation_id": correlation_id
         })
         
         # Publish result to ml-insights-results stream
@@ -186,13 +189,15 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         publisher.publish(STREAM_OUTPUT, result_message)
         LOGGER.info("Published result", extra={
             "media_id": media_id,
-            "stream": STREAM_OUTPUT
+            "stream": STREAM_OUTPUT,
+            "correlation_id": correlation_id
         })
         
     except Exception as e:
         LOGGER.exception("Error processing message", extra={
             "error": str(e),
-            "message_id": message_id
+            "message_id": message_id,
+            "correlation_id": decoded_data.get("correlationId", "") if 'decoded_data' in locals() else ""
         })
 
 

@@ -35,7 +35,8 @@ Backend → es-sync-queue → ES Sync Service
   "mediaId": "string|number",
   "mediaUrl": "string",
   "uploaderId": "string|number",
-  "timestamp": "long (optional)"
+  "timestamp": "string (optional, ISO 8601)",
+  "correlationId": "string (mandatory)"
 }
 ```
 
@@ -45,7 +46,8 @@ Backend → es-sync-queue → ES Sync Service
 - `mediaId`: ID of the specific media/image
 - `mediaUrl`: Publicly reachable URL to the image (hotlink-friendly)
 - `uploaderId`: ID of the user who uploaded the image
-- `timestamp`: Unix timestamp in milliseconds (optional)
+- `timestamp`: ISO 8601 timestamp string (optional)
+- `correlationId`: **Mandatory** - Unique ID for distributed log tracing. All AI services will log this ID for request correlation.
 
 **Example**:
 
@@ -54,7 +56,9 @@ Backend → es-sync-queue → ES Sync Service
   "postId": 90001,
   "mediaId": 70001,
   "mediaUrl": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-  "uploaderId": 101
+  "uploaderId": 101,
+  "timestamp": "2025-01-15T14:30:00Z",
+  "correlationId": "abc-123-xyz-789"
 }
 ```
 

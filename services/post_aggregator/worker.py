@@ -274,10 +274,12 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         decoded_data = decode_message(data)
         post_id = int(decoded_data.get("postId", 0))
         media_insights_str = decoded_data.get("mediaInsights", "[]")
+        correlation_id = decoded_data.get("correlationId", "")  # Extract correlationId for log tracing
         
         LOGGER.info("Received aggregation trigger", extra={
             "message_id": message_id,
-            "post_id": post_id
+            "post_id": post_id,
+            "correlation_id": correlation_id
         })
         
         if not post_id:
@@ -304,17 +306,20 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
                 media_insights = collected
                 LOGGER.info("Fetched media insights from streams", extra={
                     "post_id": post_id,
-                    "num_collected": len(media_insights)
+                    "num_collected": len(media_insights),
+                    "correlation_id": correlation_id
                 })
             except Exception as fetch_err:
                 LOGGER.error("Failed to fetch media insights from streams", extra={
                     "error": str(fetch_err),
-                    "post_id": post_id
+                    "post_id": post_id,
+                    "correlation_id": correlation_id
                 })
         
         LOGGER.info("Aggregating insights", extra={
             "post_id": post_id,
-            "media_count": len(media_insights)
+            "media_count": len(media_insights),
+            "correlation_id": correlation_id
         })
         
         # Aggregate insights
@@ -324,7 +329,8 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
             "post_id": post_id,
             "event_type": aggregated["inferredEventType"],
             "total_faces": aggregated["totalFaces"],
-            "tag_count": len(aggregated["aggregatedTags"])
+            "tag_count": len(aggregated["aggregatedTags"]),
+            "correlation_id": correlation_id
         })
         
         # Publish enriched insights
@@ -347,13 +353,15 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         publisher.publish(STREAM_OUTPUT, result_message)
         LOGGER.info("Published enriched insights", extra={
             "post_id": post_id,
+            "correlation_id": correlation_id,
             "stream": STREAM_OUTPUT
         })
         
     except Exception as e:
         LOGGER.exception("Error processing aggregation", extra={
             "error": str(e),
-            "message_id": message_id
+            "message_id": message_id,
+            "correlation_id": decoded_data.get("correlationId", "") if 'decoded_data' in locals() else ""
         })
 
 
