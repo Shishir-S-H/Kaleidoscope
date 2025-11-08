@@ -3,7 +3,9 @@
 
 services:
   content_moderation:
-    build: ./services/content_moderation
+    build:
+      context: .
+      dockerfile: ./services/content_moderation/Dockerfile
     container_name: content_moderation
     restart: always
     environment:
@@ -20,7 +22,9 @@ services:
           memory: 512M
 
   image_tagger:
-    build: ./services/image_tagger
+    build:
+      context: .
+      dockerfile: ./services/image_tagger/Dockerfile
     container_name: image_tagger
     restart: always
     environment:
@@ -37,7 +41,9 @@ services:
           memory: 512M
 
   scene_recognition:
-    build: ./services/scene_recognition
+    build:
+      context: .
+      dockerfile: ./services/scene_recognition/Dockerfile
     container_name: scene_recognition
     restart: always
     environment:
@@ -54,7 +60,9 @@ services:
           memory: 512M
 
   image_captioning:
-    build: ./services/image_captioning
+    build:
+      context: .
+      dockerfile: ./services/image_captioning/Dockerfile
     container_name: image_captioning
     restart: always
     environment:
@@ -71,7 +79,9 @@ services:
           memory: 512M
 
   face_recognition:
-    build: ./services/face_recognition
+    build:
+      context: .
+      dockerfile: ./services/face_recognition/Dockerfile
     container_name: face_recognition
     restart: always
     environment:
@@ -88,7 +98,9 @@ services:
           memory: 512M
 
   post_aggregator:
-    build: ./services/post_aggregator
+    build:
+      context: .
+      dockerfile: ./services/post_aggregator/Dockerfile
     container_name: post_aggregator
     restart: always
     environment:
@@ -104,7 +116,9 @@ services:
           memory: 512M
 
   es_sync:
-    build: ./services/es_sync
+    build:
+      context: .
+      dockerfile: ./services/es_sync/Dockerfile
     container_name: es_sync
     restart: always
     environment:
