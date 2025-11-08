@@ -51,20 +51,21 @@ echo ""
 echo -e "${BLUE}Step 5: Check if Consumer Groups Need to be Created${NC}"
 echo "Creating consumer groups if missing..."
 
-# List of services and their consumer groups
-declare -A GROUPS=(
-    ["content-moderation-group"]="content_moderation"
-    ["image-tagger-group"]="image_tagger"
-    ["scene-recognition-group"]="scene_recognition"
-    ["image-captioning-group"]="image_captioning"
-    ["face-recognition-group"]="face_recognition"
-)
+# Create consumer groups for AI services
+echo "Creating content-moderation-group..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing content-moderation-group 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created content-moderation-group" || echo "⚠️  content-moderation-group already exists"
 
-for group in "${!GROUPS[@]}"; do
-    service="${GROUPS[$group]}"
-    echo "Creating group: $group for service: $service"
-    docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing "$group" 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created $group" || echo "⚠️  $group already exists or failed"
-done
+echo "Creating image-tagger-group..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing image-tagger-group 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created image-tagger-group" || echo "⚠️  image-tagger-group already exists"
+
+echo "Creating scene-recognition-group..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing scene-recognition-group 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created scene-recognition-group" || echo "⚠️  scene-recognition-group already exists"
+
+echo "Creating image-captioning-group..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing image-captioning-group 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created image-captioning-group" || echo "⚠️  image-captioning-group already exists"
+
+echo "Creating face-recognition-group..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing face-recognition-group 0 MKSTREAM >/dev/null 2>&1 && echo "✅ Created face-recognition-group" || echo "⚠️  face-recognition-group already exists"
 
 echo ""
 echo -e "${BLUE}Step 6: Restart Services to Join Groups${NC}"

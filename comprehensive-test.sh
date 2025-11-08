@@ -65,9 +65,9 @@ docker exec kaleidoscope-image_tagger-1 sh -c "apt-get update -qq >/dev/null 2>&
 
 echo ""
 echo -e "${BLUE}Step 4: Sending Test Images${NC}"
-# Reliable images
+# Reliable images (using GitHub and a different reliable source)
 docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 77777 postId 77777 mediaUrl "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" uploaderId 101
-docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 66666 postId 66666 mediaUrl "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png" uploaderId 101
+docker exec kaleidoscope-redis-1 redis-cli XADD post-image-processing "*" mediaId 66666 postId 66666 mediaUrl "https://picsum.photos/seed/picsum/400/300" uploaderId 101
 echo "Test images sent (mediaId: 77777, 66666), waiting 60 seconds for processing..."
 
 echo ""
