@@ -10,6 +10,7 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_CONTENT_MODERATION}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
       - redis
@@ -29,6 +30,7 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_IMAGE_TAGGER}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
       - redis
@@ -48,7 +50,9 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_SCENE_RECOGNITION}
       - HF_API_TOKEN=${HF_API_TOKEN}
+      - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
     depends_on:
       - redis
     networks:
@@ -67,6 +71,7 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_IMAGE_CAPTIONING}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
       - redis
@@ -86,6 +91,7 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_FACE_RECOGNITION}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
       - redis

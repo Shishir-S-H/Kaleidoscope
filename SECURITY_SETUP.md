@@ -41,8 +41,18 @@ REDIS_PASSWORD=your-strong-redis-password-here
 # Elasticsearch Configuration (REQUIRED)
 ELASTICSEARCH_PASSWORD=your-strong-elasticsearch-password-here
 
-# HuggingFace API Configuration
+# HuggingFace API Configuration (REQUIRED)
 HF_API_TOKEN=your-huggingface-api-token-here
+
+# HuggingFace API URLs (REQUIRED - one for each AI service)
+HF_API_URL_CONTENT_MODERATION=https://phantomfury-kaleidoscope-content-moderation.hf.space/classify
+HF_API_URL_IMAGE_TAGGER=https://phantomfury-kaleidoscope-image-tagger.hf.space/tag
+HF_API_URL_SCENE_RECOGNITION=https://phantomfury-kaleidoscope-scene-recognition.hf.space/recognize
+HF_API_URL_IMAGE_CAPTIONING=https://phantomfury-kaleidoscope-image-captioning.hf.space/caption
+HF_API_URL_FACE_RECOGNITION=https://phantomfury-kaleidoscope-face-recognition.hf.space/detect
+
+# Scene Recognition Configuration (optional)
+SCENE_LABELS=beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic
 
 # Database Configuration (for ES Sync service)
 DB_HOST=postgres
