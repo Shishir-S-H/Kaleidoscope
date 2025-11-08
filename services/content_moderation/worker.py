@@ -3,6 +3,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime
 from dotenv import load_dotenv
 
 import requests
@@ -189,7 +190,8 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             "postId": str(post_id),
             "service": "moderation",
             "isSafe": "true" if moderation_result["is_safe"] else "false",
-            "moderationConfidence": str(moderation_result.get("confidence", 0.0))
+            "moderationConfidence": str(moderation_result.get("confidence", 0.0)),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)

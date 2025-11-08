@@ -3,6 +3,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime
 from dotenv import load_dotenv
 
 import requests
@@ -141,7 +142,8 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             "mediaId": str(media_id),
             "postId": str(post_id),
             "service": "captioning",
-            "caption": caption_result['caption']
+            "caption": caption_result['caption'],
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)

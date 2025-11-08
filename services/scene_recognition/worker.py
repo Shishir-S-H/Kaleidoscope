@@ -178,7 +178,8 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             "mediaId": str(media_id),
             "postId": str(post_id),
             "service": "scene_recognition",
-            "scenes": json.dumps(list(scene_result['scores'].keys()))  # All scenes above threshold
+            "scenes": json.dumps(list(scene_result['scores'].keys())),  # All scenes above threshold
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)

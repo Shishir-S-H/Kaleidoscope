@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Set
 from collections import Counter
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Add parent directories to path for shared imports
@@ -333,7 +334,8 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
             "moderationConfidence": str(aggregated["moderationConfidence"]),
             "eventType": aggregated["eventType"],
             "combinedCaption": aggregated["combinedCaption"],
-            "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false"
+            "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false",
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)
