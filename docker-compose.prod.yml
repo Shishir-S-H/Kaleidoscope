@@ -16,7 +16,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   image_tagger:
@@ -33,7 +33,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   scene_recognition:
@@ -50,7 +50,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   image_captioning:
@@ -67,7 +67,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   face_recognition:
@@ -84,7 +84,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   post_aggregator:
@@ -100,7 +100,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   es_sync:
@@ -109,7 +109,7 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - ES_HOST=http://elasticsearch:9200
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
     depends_on:
       - redis
       - elasticsearch
@@ -118,16 +118,17 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   redis:
     image: redis:alpine
     container_name: redis
     restart: always
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --protected-mode yes
+    # Remove public port exposure - only accessible within Docker network
+    # ports:
+    #   - "6379:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -140,7 +141,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
 
   elasticsearch:
@@ -149,24 +150,32 @@ services:
     restart: always
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-    ports:
-      - "9200:9200"
-      - "9300:9300"
+    # Remove public port exposure - only accessible within Docker network
+    # If external access needed, use firewall rules or reverse proxy
+    # ports:
+    #   - "9200:9200"
+    #   - "9300:9300"
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
       - kaleidoscope-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 2G
 
 networks:

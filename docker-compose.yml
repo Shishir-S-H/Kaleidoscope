@@ -11,7 +11,7 @@ services:
     env_file:
       - ./shared/env_templates/content_moderation.env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     logging:
@@ -29,7 +29,7 @@ services:
     env_file:
       - ./shared/env_templates/image_tagger.env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     logging:
@@ -47,7 +47,7 @@ services:
     env_file:
       - ./shared/env_templates/scene_recognition.env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     logging:
@@ -65,7 +65,7 @@ services:
     env_file:
       - ./shared/env_templates/image_captioning.env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     logging:
@@ -133,7 +133,7 @@ services:
     env_file:
       - ./shared/env_templates/face_recognition.env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     restart: always
@@ -149,7 +149,7 @@ services:
       - ./services/post_aggregator:/app
       - ./shared:/app/shared
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
     depends_on:
       - redis
     restart: always
@@ -165,8 +165,8 @@ services:
       - ./services/es_sync:/app
       - ./shared:/app/shared
     environment:
-      - REDIS_URL=redis://redis:6379
-      - ES_HOST=http://elasticsearch:9200
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD:-changeme123}@elasticsearch:9200
     depends_on:
       - redis
       - elasticsearch
@@ -209,7 +209,7 @@ services:
   #     options:
   #       max-size: "10m"
   #       max-file: "3"
-  
+
   # RabbitMQ removed - using Redis Streams instead
 
   redis:
@@ -218,9 +218,9 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme123} --protected-mode yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme123}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -237,7 +237,9 @@ services:
       - "9300:9300"
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:-changeme123}
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
     volumes:
       - es-data:/usr/share/elasticsearch/data
