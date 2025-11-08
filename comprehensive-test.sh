@@ -37,7 +37,18 @@ docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE es-sync-queue es-sync-g
 docker exec kaleidoscope-redis-1 redis-cli XINFO GROUPS es-sync-queue || true
 
 echo ""
-echo -e "${BLUE}Step 2.7: Baseline Resource Usage${NC}"
+echo -e "${BLUE}Step 2.7: Ensure AI service consumer groups exist${NC}"
+echo "Creating consumer groups for AI services on post-image-processing stream..."
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing content-moderation-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing image-tagger-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing scene-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing image-captioning-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec kaleidoscope-redis-1 redis-cli XGROUP CREATE post-image-processing face-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
+echo "Consumer groups created/verified"
+docker exec kaleidoscope-redis-1 redis-cli XINFO GROUPS post-image-processing || true
+
+echo ""
+echo -e "${BLUE}Step 2.8: Baseline Resource Usage${NC}"
 echo "=== System Resources (Before Load) ==="
 echo "Memory Usage:"
 free -h
