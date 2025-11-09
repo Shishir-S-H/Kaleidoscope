@@ -424,12 +424,64 @@ EOF
         
         # Test token with a simple POST request to see if it's a POST-specific issue
         echo "  Testing token with a simple POST request (to verify POST authentication works)..."
+        echo "  Trying different curl approaches..."
+        
+        # Approach 1: Standard curl with -X POST
+        echo "    Approach 1: Standard -X POST..."
         TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{"test": "invalid"}' \
             2>&1)
         TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        
+        # If Approach 1 fails, try Approach 2: Using --data-raw
+        if [ "$TEST_POST_HTTP" = "401" ]; then
+            echo "    Approach 1 failed (401), trying Approach 2: --data-raw..."
+            TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Content-Type: application/json" \
+                --data-raw '{"test": "invalid"}' \
+                2>&1)
+            TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        fi
+        
+        # If Approach 2 fails, try Approach 3: Using --json (if curl supports it)
+        if [ "$TEST_POST_HTTP" = "401" ]; then
+            echo "    Approach 2 failed (401), trying Approach 3: --json flag..."
+            TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --json '{"test": "invalid"}' \
+                2>&1)
+            TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        fi
+        
+        # If Approach 3 fails, try Approach 4: Different header order
+        if [ "$TEST_POST_HTTP" = "401" ]; then
+            echo "    Approach 3 failed (401), trying Approach 4: Different header order..."
+            TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Content-Type: application/json" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Accept: application/json" \
+                --data '{"test": "invalid"}' \
+                2>&1)
+            TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        fi
+        
+        # If Approach 4 fails, try Approach 5: With additional headers
+        if [ "$TEST_POST_HTTP" = "401" ]; then
+            echo "    Approach 4 failed (401), trying Approach 5: With additional headers..."
+            TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Content-Type: application/json; charset=utf-8" \
+                --header "Accept: application/json" \
+                --header "User-Agent: curl/7.81.0" \
+                --header "Origin: http://localhost:8080" \
+                --header "Referer: http://localhost:8080" \
+                --data '{"test": "invalid"}' \
+                2>&1)
+            TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        fi
         if [ "$TEST_POST_HTTP" = "401" ]; then
             echo -e "  ${RED}❌${NC} POST authentication failed (HTTP 401) - this is the root cause"
             echo "  The backend is rejecting POST requests even with a valid token"
@@ -474,7 +526,9 @@ EOF
         echo "  Checking backend logs before request..."
         BACKEND_LOGS_BEFORE=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=10 app 2>/dev/null | tail -5 || echo "")
         
-        # Make the request
+        # Try different curl approaches for the actual POST request
+        # Approach 1: Standard curl with -X POST
+        echo "  Trying Approach 1: Standard -X POST..."
         CREATE_POST_RESPONSE=$(curl -v -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -482,8 +536,51 @@ EOF
             -d "$CREATE_POST_BODY" \
             2>&1)
         
+        HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
+        
+        # If Approach 1 fails with 401, try Approach 2: Using --request POST
+        if [ "$HTTP_CODE" = "401" ]; then
+            echo "  Approach 1 failed (401), trying Approach 2: --request POST..."
+            CREATE_POST_RESPONSE=$(curl -v -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Content-Type: application/json" \
+                --header "Origin: http://localhost:8080" \
+                --header "Accept: application/json" \
+                --data-raw "$CREATE_POST_BODY" \
+                2>&1)
+            HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
+        fi
+        
+        # If Approach 2 fails, try Approach 3: Using --json (if curl supports it)
+        if [ "$HTTP_CODE" = "401" ]; then
+            echo "  Approach 2 failed (401), trying Approach 3: --json flag..."
+            CREATE_POST_RESPONSE=$(curl -v -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Origin: http://localhost:8080" \
+                --json "$CREATE_POST_BODY" \
+                2>&1)
+            HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
+        fi
+        
+        # If Approach 3 fails, try Approach 4: Different header order and charset
+        if [ "$HTTP_CODE" = "401" ]; then
+            echo "  Approach 3 failed (401), trying Approach 4: Different header order..."
+            CREATE_POST_RESPONSE=$(curl -v -s -w "\n%{http_code}" --request POST "${BACKEND_API_BASE}/posts" \
+                --header "Content-Type: application/json; charset=utf-8" \
+                --header "Authorization: Bearer ${JWT_TOKEN}" \
+                --header "Accept: application/json" \
+                --header "Origin: http://localhost:8080" \
+                --header "Referer: http://localhost:8080" \
+                --data "$CREATE_POST_BODY" \
+                2>&1)
+            HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
+        fi
+        
         # Extract correlation ID from response if available
         CORRELATION_ID_FROM_RESPONSE=$(echo "$CREATE_POST_RESPONSE" | grep -i "X-Correlation-ID" | sed 's/.*X-Correlation-ID: //' | tr -d '\r' | tr -d ' ' | head -1 || echo "")
+        
+        # Extract POST response body (everything except the last line which is HTTP_CODE)
+        POST_RESPONSE_BODY=$(echo "$CREATE_POST_RESPONSE" | head -n -1)
         
         # Check backend logs after request
         echo "  Checking backend logs after request..."
@@ -617,9 +714,7 @@ EOF
             fi
         fi
         
-        HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
-        POST_RESPONSE_BODY=$(echo "$CREATE_POST_RESPONSE" | head -n -1)
-        
+        # HTTP_CODE and POST_RESPONSE_BODY are already extracted above
         echo "  HTTP Status: $HTTP_CODE"
         
         if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
