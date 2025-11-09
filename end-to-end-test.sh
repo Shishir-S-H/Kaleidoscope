@@ -25,7 +25,7 @@ REDIS_PASSWORD=${REDIS_PASSWORD:-kaleidoscope1-reddis}
 ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-kaleidoscope1-elastic}
 BACKEND_URL=${BACKEND_URL:-http://localhost:8080}
 BACKEND_API_BASE="${BACKEND_URL}/kaleidoscope/api"
-BACKEND_AUTH_BASE="${BACKEND_URL}/api/auth"
+BACKEND_AUTH_BASE="${BACKEND_URL}/kaleidoscope/api/auth"
 
 # Test user credentials (can be overridden via environment variables)
 TEST_USER_EMAIL=${TEST_USER_EMAIL:-user@gmail.com}
