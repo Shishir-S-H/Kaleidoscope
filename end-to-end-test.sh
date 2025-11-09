@@ -606,6 +606,18 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
         if [ -n "$PENDING_DETAILS" ]; then
             echo "  Pending message details (first 5):"
             echo "$PENDING_DETAILS" | head -5 | sed 's/^/    /'
+            
+            # Calculate age of oldest pending message (in seconds)
+            OLDEST_IDLE=$(echo "$PENDING_DETAILS" | head -1 | awk '{print $3}' || echo "0")
+            if [ "$OLDEST_IDLE" -gt 0 ] 2>/dev/null; then
+                OLDEST_AGE_HOURS=$((OLDEST_IDLE / 1000 / 3600))
+                OLDEST_AGE_MINUTES=$(((OLDEST_IDLE / 1000) % 3600 / 60))
+                if [ "$OLDEST_AGE_HOURS" -gt 0 ] 2>/dev/null; then
+                    echo -e "  ${YELLOW}⚠️${NC}  Oldest pending message is ${OLDEST_AGE_HOURS}h ${OLDEST_AGE_MINUTES}m old (may need manual ACK)"
+                elif [ "$OLDEST_AGE_MINUTES" -gt 5 ] 2>/dev/null; then
+                    echo -e "  ${YELLOW}⚠️${NC}  Oldest pending message is ${OLDEST_AGE_MINUTES}m old"
+                fi
+            fi
         fi
         
         # Check backend logs for processing errors
@@ -665,9 +677,41 @@ wait_for_message "post-insights-enriched" 30
 # Verify aggregated message (check last 10 messages for our postId)
 echo "Verifying aggregated message format..."
 AGGREGATED_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 10 2>/dev/null || echo "")
-AGGREGATED_MESSAGE=$(echo "$AGGREGATED_MESSAGES" | grep -A 20 "postId.*${TEST_POST_ID}" | head -20 || echo "")
 
-if [ -n "$AGGREGATED_MESSAGE" ] && echo "$AGGREGATED_MESSAGE" | grep -q "postId.*${TEST_POST_ID}"; then
+# In Redis streams, format is: messageId field1 value1 field2 value2 ...
+# We need to find where postId field is followed by our TEST_POST_ID value
+# Use awk to find messages where postId field is followed by our postId value
+AGGREGATED_MESSAGE=$(echo "$AGGREGATED_MESSAGES" | awk -v postid="${TEST_POST_ID}" '
+    BEGIN { found=0; in_message=0; message="" }
+    /^[0-9]+-[0-9]+$/ { 
+        if (found) exit
+        in_message=1
+        message=$0 "\n"
+        next
+    }
+    in_message {
+        message=message $0 "\n"
+        if ($0 == "postId") {
+            getline next_line
+            message=message next_line "\n"
+            if (next_line == postid) {
+                found=1
+                # Get more lines for full message
+                for (i=0; i<20; i++) {
+                    if ((getline line) > 0) {
+                        message=message line "\n"
+                    } else {
+                        break
+                    }
+                }
+                print message
+                exit
+            }
+        }
+    }
+' || echo "")
+
+if [ -n "$AGGREGATED_MESSAGE" ] && echo "$AGGREGATED_MESSAGE" | grep -q "^postId$" && echo "$AGGREGATED_MESSAGE" | grep -q "^${TEST_POST_ID}$"; then
     echo -e "  ${GREEN}✅${NC} Found aggregated message for postId=$TEST_POST_ID"
     
     # Check format
@@ -695,10 +739,15 @@ if [ -n "$AGGREGATED_MESSAGE" ] && echo "$AGGREGATED_MESSAGE" | grep -q "postId.
 else
     echo -e "  ${RED}❌${NC} Aggregated message not found for postId=$TEST_POST_ID"
     echo "  Checking recent messages in stream..."
-    RECENT_POST_IDS=$(echo "$AGGREGATED_MESSAGES" | grep "postId" | head -5 || echo "")
+    # Extract postId values from recent messages
+    RECENT_POST_IDS=$(echo "$AGGREGATED_MESSAGES" | awk '/^postId$/{getline; print $0}' | head -5 || echo "")
     if [ -n "$RECENT_POST_IDS" ]; then
         echo "  Recent postIds in stream:"
         echo "$RECENT_POST_IDS" | sed 's/^/    /'
+    else
+        # Show raw message structure for debugging
+        echo "  Raw message structure (first 20 lines):"
+        echo "$AGGREGATED_MESSAGES" | head -20 | sed 's/^/    /'
     fi
 fi
 
@@ -782,6 +831,16 @@ if [ "$ES_SYNC_MESSAGES" -gt 0 ] 2>/dev/null; then
             echo "$ES_SYNC_ERRORS" | sed 's/^/    /'
         fi
         
+        # Check PostgreSQL connection status
+        echo "  Checking PostgreSQL connection..."
+        PG_CONNECTION=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 es_sync 2>/dev/null | grep -E "Connected to PostgreSQL|PostgreSQL connection" | tail -1 || echo "")
+        if [ -n "$PG_CONNECTION" ]; then
+            echo "  PostgreSQL connection status:"
+            echo "$PG_CONNECTION" | sed 's/^/    /'
+        else
+            echo -e "  ${YELLOW}⚠️${NC}  No PostgreSQL connection log found"
+        fi
+        
         # Check if es_sync is actually running
         if docker ps --format "{{.Names}}" | grep -qE "^es_sync$|kaleidoscope.*es_sync"; then
             echo "  ES sync container is running"
@@ -855,13 +914,20 @@ if [ "$DLQ_LENGTH" -eq "0" ] 2>/dev/null; then
 else
     echo -e "  ${YELLOW}⚠️${NC}  $DLQ_LENGTH messages in DLQ"
     echo "  Inspecting DLQ messages (last 3)..."
-    DLQ_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE ai-processing-dlq + - COUNT 3 2>/dev/null | grep -E "serviceName|error|originalMessageId|retryCount" || echo "")
-    if [ -n "$DLQ_MESSAGES" ]; then
+    DLQ_RAW=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE ai-processing-dlq + - COUNT 3 2>/dev/null || echo "")
+    if [ -n "$DLQ_RAW" ]; then
         echo "  DLQ message details:"
-        echo "$DLQ_MESSAGES" | head -12 | sed 's/^/    /'
+        # Extract field-value pairs for key fields
+        echo "$DLQ_RAW" | awk '
+            /^serviceName$/{getline; print "    serviceName: " $0}
+            /^error$/{getline; print "    error: " $0}
+            /^originalMessageId$/{getline; print "    originalMessageId: " $0}
+            /^retryCount$/{getline; print "    retryCount: " $0}
+            /^originalStream$/{getline; print "    originalStream: " $0}
+        ' | head -15
         
         # Check if any DLQ messages are from our test
-        if echo "$DLQ_MESSAGES" | grep -q "${TEST_CORRELATION_ID}\|${TEST_POST_ID}\|${TEST_MEDIA_ID_1}\|${TEST_MEDIA_ID_2}"; then
+        if echo "$DLQ_RAW" | grep -q "${TEST_CORRELATION_ID}\|${TEST_POST_ID}\|${TEST_MEDIA_ID_1}\|${TEST_MEDIA_ID_2}"; then
             echo -e "  ${RED}❌${NC} Test messages found in DLQ!"
         fi
     else
