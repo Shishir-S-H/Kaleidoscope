@@ -130,7 +130,19 @@ verify_ai_service_processed() {
     echo -n "  Checking $service processed mediaId=$media_id..."
     
     # Check if message exists in output stream
-    local found=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 20 2>/dev/null | grep -c "mediaId.*${media_id}" || echo "0")
+    # Redis stream output format: field1 value1 field2 value2 ...
+    # We need to check if mediaId field has the value we're looking for
+    local stream_output=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 20 2>/dev/null || echo "")
+    
+    # Check if mediaId field with our value exists
+    # Pattern: mediaId followed by the media_id value (could be on same or next line)
+    local found=$(echo "$stream_output" | grep -E "(mediaId|^${media_id}$)" | grep -A1 "mediaId" | grep -c "^${media_id}$" || echo "0")
+    
+    # Also try simpler pattern: just check if media_id appears near mediaId
+    if [ "$found" -eq 0 ] 2>/dev/null; then
+        found=$(echo "$stream_output" | grep -E "mediaId|${media_id}" | grep -c "${media_id}" || echo "0")
+    fi
+    
     # Handle empty string
     if [ -z "$found" ] || [ "$found" = "" ]; then
         found=0
@@ -332,8 +344,16 @@ echo "===================================="
 
 # Wait for AI services to process
 echo "Waiting for AI services to process images..."
+# Wait a bit longer for processing
+echo "  Waiting 15 seconds for AI services to process..."
+sleep 15
 wait_for_message "ml-insights-results" 60
 wait_for_message "face-detection-results" 60
+
+# Show recent messages for debugging
+echo ""
+echo "  Recent messages in ml-insights-results (last 3):"
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE ml-insights-results + - COUNT 3 2>/dev/null | grep -E "mediaId|postId|service" | head -9 || echo "  No messages found"
 
 # Verify each AI service processed both images
 echo ""
@@ -483,7 +503,8 @@ if [ "$ES_SYNC_MESSAGES" -gt 0 ] 2>/dev/null; then
     
     # Check ES sync logs
     ES_SYNC_PROCESSED=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 es_sync 2>/dev/null | grep -c "Processing.*sync" || echo "0")
-    if [ "$ES_SYNC_PROCESSED" -gt 0 ]; then
+    [ -z "$ES_SYNC_PROCESSED" ] && ES_SYNC_PROCESSED=0
+    if [ "$ES_SYNC_PROCESSED" -gt 0 ] 2>/dev/null; then
         echo -e "  ${GREEN}✅${NC} ES sync is processing messages"
     else
         echo -e "  ${YELLOW}⚠️${NC}  ES sync may not be processing (check logs)"
