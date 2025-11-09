@@ -424,11 +424,23 @@ EOF
         
         # Make the POST request with verbose error output
         echo "  Making POST request to create post..."
-        CREATE_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
+        
+        # Check backend logs before request
+        echo "  Checking backend logs before request..."
+        BACKEND_LOGS_BEFORE=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=10 app 2>/dev/null | tail -5 || echo "")
+        
+        # Make the request
+        CREATE_POST_RESPONSE=$(curl -v -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
+            -H "Origin: http://localhost:8080" \
             -d "$CREATE_POST_BODY" \
             2>&1)
+        
+        # Check backend logs after request
+        echo "  Checking backend logs after request..."
+        sleep 2
+        BACKEND_LOGS_AFTER=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 app 2>/dev/null | grep -E "POST.*posts|createPost|PostController|AuthTokenFilter|JWT|Authentication|401|Unauthorized|Creating post" | tail -10 || echo "")
         
         # Debug: Show request details if it fails
         if echo "$CREATE_POST_RESPONSE" | tail -1 | grep -q "401"; then
@@ -438,13 +450,30 @@ EOF
             echo "    Token length: ${#JWT_TOKEN}"
             echo "    Request body size: $(echo "$CREATE_POST_BODY" | wc -c) bytes"
             echo ""
-            echo "  Checking backend logs for authentication errors..."
-            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 app 2>/dev/null | grep -E "AuthTokenFilter|JWT|Authentication|401|Unauthorized" | tail -5 || echo "")
-            if [ -n "$BACKEND_AUTH_ERRORS" ]; then
-                echo "  Backend authentication logs:"
-                echo "$BACKEND_AUTH_ERRORS" | sed 's/^/    /'
+            
+            # Show curl verbose output for debugging
+            echo "  Curl verbose output:"
+            echo "$CREATE_POST_RESPONSE" | grep -E "< HTTP|< Authorization|> Authorization|> Content-Type" | head -10 | sed 's/^/    /' || echo "    No verbose output available"
+            echo ""
+            
+            # Check backend logs for the POST request
+            if [ -n "$BACKEND_LOGS_AFTER" ]; then
+                echo "  Backend logs for POST request:"
+                echo "$BACKEND_LOGS_AFTER" | sed 's/^/    /'
             else
-                echo "  No recent authentication errors in backend logs"
+                echo "  ⚠️  No backend logs found for POST request"
+                echo "  This might indicate:"
+                echo "    - Request is not reaching the backend"
+                echo "    - Request is being blocked before reaching the controller"
+                echo "    - Backend is not logging the request"
+            fi
+            echo ""
+            
+            # Check for authentication errors specifically
+            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "AuthTokenFilter.*POST|JWT.*POST|Authentication.*POST|401.*POST|Unauthorized.*POST" | tail -5 || echo "")
+            if [ -n "$BACKEND_AUTH_ERRORS" ]; then
+                echo "  Backend authentication errors for POST:"
+                echo "$BACKEND_AUTH_ERRORS" | sed 's/^/    /'
             fi
         fi
         
