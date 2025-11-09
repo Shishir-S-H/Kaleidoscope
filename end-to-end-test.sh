@@ -416,93 +416,94 @@ fi
 if [ "$TEST_MODE" != "api" ] || [ -z "$JWT_TOKEN" ]; then
     echo "Using DIRECT mode: Publishing directly to Redis streams..."
     echo ""
+    
+    # Verify messages can be published
+    echo "  Testing Redis connection..."
+    # Try to ping Redis (handle both with and without password)
+    REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
+    if [ -z "$REDIS_PING_RESULT" ]; then
+        # Try without password
+        REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | tail -1 || echo "")
+    fi
 
-# Verify messages can be published
-echo "  Testing Redis connection..."
-# Try to ping Redis (handle both with and without password)
-REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
-if [ -z "$REDIS_PING_RESULT" ]; then
-    # Try without password
-    REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | tail -1 || echo "")
-fi
-
-if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
-    echo -e "  ${GREEN}✅${NC} Redis connection successful"
-elif [ -z "$REDIS_PASSWORD" ]; then
-    echo -e "  ${YELLOW}⚠️${NC}  REDIS_PASSWORD not set, trying without password..."
-    # Try without password
-    if docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | grep -q "PONG"; then
-        echo -e "  ${GREEN}✅${NC} Redis connection successful (no password)"
-    else
-        echo -e "  ${RED}❌${NC} Redis connection failed"
-        echo "  Debug: Trying to get password from .env file..."
-        if [ -f ".env" ]; then
-            REDIS_PASSWORD_FROM_ENV=$(grep "^REDIS_PASSWORD=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
-            if [ -n "$REDIS_PASSWORD_FROM_ENV" ]; then
-                echo "  Found REDIS_PASSWORD in .env, trying again..."
-                REDIS_PASSWORD="$REDIS_PASSWORD_FROM_ENV"
-                if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
-                    echo -e "  ${GREEN}✅${NC} Redis connection successful (with password from .env)"
+    if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
+        echo -e "  ${GREEN}✅${NC} Redis connection successful"
+    elif [ -z "$REDIS_PASSWORD" ]; then
+        echo -e "  ${YELLOW}⚠️${NC}  REDIS_PASSWORD not set, trying without password..."
+        # Try without password
+        if docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | grep -q "PONG"; then
+            echo -e "  ${GREEN}✅${NC} Redis connection successful (no password)"
+        else
+            echo -e "  ${RED}❌${NC} Redis connection failed"
+            echo "  Debug: Trying to get password from .env file..."
+            if [ -f ".env" ]; then
+                REDIS_PASSWORD_FROM_ENV=$(grep "^REDIS_PASSWORD=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+                if [ -n "$REDIS_PASSWORD_FROM_ENV" ]; then
+                    echo "  Found REDIS_PASSWORD in .env, trying again..."
+                    REDIS_PASSWORD="$REDIS_PASSWORD_FROM_ENV"
+                    if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
+                        echo -e "  ${GREEN}✅${NC} Redis connection successful (with password from .env)"
+                    else
+                        echo -e "  ${RED}❌${NC} Redis connection failed even with password from .env"
+                        exit 1
+                    fi
                 else
-                    echo -e "  ${RED}❌${NC} Redis connection failed even with password from .env"
+                    echo -e "  ${RED}❌${NC} REDIS_PASSWORD not found in .env file"
                     exit 1
                 fi
             else
-                echo -e "  ${RED}❌${NC} REDIS_PASSWORD not found in .env file"
+                echo -e "  ${RED}❌${NC} .env file not found"
                 exit 1
             fi
-        else
-            echo -e "  ${RED}❌${NC} .env file not found"
-            exit 1
         fi
+    else
+        echo -e "  ${RED}❌${NC} Redis connection failed"
+        echo "  Debug info:"
+        echo "    REDIS_PASSWORD length: ${#REDIS_PASSWORD}"
+        echo "    Redis container: $(docker ps --format '{{.Names}}' | grep redis | head -1)"
+        echo "    Trying direct connection test..."
+        docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
+        exit 1
     fi
-else
-    echo -e "  ${RED}❌${NC} Redis connection failed"
-    echo "  Debug info:"
-    echo "    REDIS_PASSWORD length: ${#REDIS_PASSWORD}"
-    echo "    Redis container: $(docker ps --format '{{.Names}}' | grep redis | head -1)"
-    echo "    Trying direct connection test..."
-    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
-    exit 1
+
+    # Publish messages to post-image-processing (simulating backend)
+    echo "  Publishing media 1 (mediaId=$TEST_MEDIA_ID_1)..."
+    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
+        postId "$TEST_POST_ID" \
+        mediaId "$TEST_MEDIA_ID_1" \
+        mediaUrl "$TEST_IMAGE_1" \
+        uploaderId "$TEST_USER_ID" \
+        correlationId "$TEST_CORRELATION_ID" \
+        >/dev/null 2>&1
+
+    echo "  Publishing media 2 (mediaId=$TEST_MEDIA_ID_2)..."
+    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
+        postId "$TEST_POST_ID" \
+        mediaId "$TEST_MEDIA_ID_2" \
+        mediaUrl "$TEST_IMAGE_2" \
+        uploaderId "$TEST_USER_ID" \
+        correlationId "$TEST_CORRELATION_ID" \
+        >/dev/null 2>&1
+
+    echo -e "${GREEN}✅${NC} Published 2 media items to post-image-processing stream"
+
+    # Verify messages were published
+    echo "  Verifying messages in stream..."
+    STREAM_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+    [ -z "$STREAM_LENGTH" ] && STREAM_LENGTH=0
+    echo "  Stream length: $STREAM_LENGTH messages"
+
+    # Show recent messages
+    echo "  Recent messages in stream:"
+    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
+
+    echo "  Waiting 5 seconds for AI services to start processing..."
+    sleep 5
+
+    # Check AI service logs for any errors
+    echo "  Checking AI service logs for errors..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=20 content_moderation 2>/dev/null | grep -E "ERROR|Exception|Failed" | head -3 || echo "  No errors in content_moderation logs"
 fi
-
-# Publish messages to post-image-processing (simulating backend)
-echo "  Publishing media 1 (mediaId=$TEST_MEDIA_ID_1)..."
-docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
-    postId "$TEST_POST_ID" \
-    mediaId "$TEST_MEDIA_ID_1" \
-    mediaUrl "$TEST_IMAGE_1" \
-    uploaderId "$TEST_USER_ID" \
-    correlationId "$TEST_CORRELATION_ID" \
-    >/dev/null 2>&1
-
-echo "  Publishing media 2 (mediaId=$TEST_MEDIA_ID_2)..."
-docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
-    postId "$TEST_POST_ID" \
-    mediaId "$TEST_MEDIA_ID_2" \
-    mediaUrl "$TEST_IMAGE_2" \
-    uploaderId "$TEST_USER_ID" \
-    correlationId "$TEST_CORRELATION_ID" \
-    >/dev/null 2>&1
-
-echo -e "${GREEN}✅${NC} Published 2 media items to post-image-processing stream"
-
-# Verify messages were published
-echo "  Verifying messages in stream..."
-STREAM_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-[ -z "$STREAM_LENGTH" ] && STREAM_LENGTH=0
-echo "  Stream length: $STREAM_LENGTH messages"
-
-# Show recent messages
-echo "  Recent messages in stream:"
-docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
-
-echo "  Waiting 5 seconds for AI services to start processing..."
-sleep 5
-
-# Check AI service logs for any errors
-echo "  Checking AI service logs for errors..."
-docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=20 content_moderation 2>/dev/null | grep -E "ERROR|Exception|Failed" | head -3 || echo "  No errors in content_moderation logs"
 
 echo ""
 echo -e "${BLUE}Step 4: Verify AI Services Processing${NC}"
