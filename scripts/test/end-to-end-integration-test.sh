@@ -209,7 +209,7 @@ fi
 
 # Generate upload signatures to get valid Cloudinary URLs
 log_info "Generating upload signatures for test images..."
-SIGNATURE_REQUEST='{"contentType":"POST","fileNames":["test-image-1.jpg","test-image-2.jpg"]}'
+SIGNATURE_REQUEST='{"fileNames":["test-image-1.jpg","test-image-2.jpg"]}'
 SIGNATURE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/posts/generate-upload-signatures" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${JWT_TOKEN}" \
