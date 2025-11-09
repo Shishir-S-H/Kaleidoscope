@@ -239,8 +239,23 @@ docker exec redis redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*
     >/dev/null 2>&1
 
 echo -e "${GREEN}✅${NC} Published 2 media items to post-image-processing stream"
+
+# Verify messages were published
+echo "  Verifying messages in stream..."
+STREAM_LENGTH=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+[ -z "$STREAM_LENGTH" ] && STREAM_LENGTH=0
+echo "  Stream length: $STREAM_LENGTH messages"
+
+# Show recent messages
+echo "  Recent messages in stream:"
+docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
+
 echo "  Waiting 5 seconds for AI services to start processing..."
 sleep 5
+
+# Check AI service logs for any errors
+echo "  Checking AI service logs for errors..."
+docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=20 content_moderation 2>/dev/null | grep -E "ERROR|Exception|Failed" | head -3 || echo "  No errors in content_moderation logs"
 
 echo ""
 echo -e "${BLUE}Step 4: Verify AI Services Processing${NC}"
