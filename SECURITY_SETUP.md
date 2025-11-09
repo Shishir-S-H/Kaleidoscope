@@ -62,7 +62,7 @@ DB_USER=kaleidoscope_user
 DB_PASSWORD=your-database-password-here
 
 # Backend Application Configuration (optional - defaults provided)
-DOCKER_REGISTRY=ajayprabhu2004
+DOCKER_REGISTRY=rajay04
 APP_VERSION=latest
 APP_CONTAINER_NAME=kaleidoscope-app
 APP_PORT=8080
