@@ -405,28 +405,79 @@ EOF
         if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
             echo -e "  ${GREEN}✅${NC} Post created successfully"
             
-            # Extract postId and mediaIds from response
+            # Parse JSON response to extract postId and mediaIds
+            # Backend returns: {"success":true,"message":"...","data":{"postId":123,"media":[{"mediaId":456},...]}}
             TEST_POST_ID=$(echo "$POST_RESPONSE_BODY" | grep -o '"postId":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
             if [ -z "$TEST_POST_ID" ]; then
-                # Try alternative format
+                # Try alternative format (nested in data)
+                TEST_POST_ID=$(echo "$POST_RESPONSE_BODY" | grep -o '"data".*"postId":[0-9]*' | grep -o '"postId":[0-9]*' | cut -d':' -f2 || echo "")
+            fi
+            if [ -z "$TEST_POST_ID" ]; then
+                # Try id field
                 TEST_POST_ID=$(echo "$POST_RESPONSE_BODY" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
             fi
             
-            # Extract media IDs (they might be in the response)
-            TEST_MEDIA_ID_1=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | head -1 | cut -d':' -f2 || echo "$(($(date +%s) + 1))")
-            TEST_MEDIA_ID_2=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | tail -1 | cut -d':' -f2 || echo "$(($(date +%s) + 2))")
+            # Extract media IDs from response
+            TEST_MEDIA_ID_1=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
+            TEST_MEDIA_ID_2=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | tail -1 | cut -d':' -f2 || echo "")
             
             if [ -z "$TEST_POST_ID" ]; then
-                echo -e "  ${YELLOW}⚠️${NC}  Could not extract postId from response, using generated ID"
-                TEST_POST_ID=$(date +%s)
+                echo -e "  ${RED}❌${NC} Could not extract postId from response"
+                echo "  Response body: $POST_RESPONSE_BODY"
+                echo ""
+                echo "  ${YELLOW}⚠️${NC}  Test cannot continue without postId. Exiting..."
+                exit 1
             else
                 echo "  Post ID: $TEST_POST_ID"
-                echo "  Media IDs: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
+                if [ -n "$TEST_MEDIA_ID_1" ] && [ -n "$TEST_MEDIA_ID_2" ]; then
+                    echo "  Media IDs: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
+                else
+                    echo "  Media IDs: (extracting from stream)"
+                fi
             fi
             
+            # Update correlation ID to match what backend will use
+            TEST_CORRELATION_ID="e2e-test-${TEST_POST_ID}"
+            
             echo ""
-            echo "  Waiting 5 seconds for backend to publish to Redis streams..."
-            sleep 5
+            echo "  Monitoring backend publishing to Redis streams..."
+            echo "  Waiting for backend to publish messages to post-image-processing..."
+            
+            # Wait for backend to publish messages (check stream length increase)
+            BASELINE_POST_IMAGE_NOW=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+            [ -z "$BASELINE_POST_IMAGE_NOW" ] && BASELINE_POST_IMAGE_NOW=0
+            
+            # Wait up to 10 seconds for new messages
+            WAIT_COUNT=0
+            while [ $WAIT_COUNT -lt 10 ]; do
+                sleep 1
+                CURRENT_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+                [ -z "$CURRENT_LENGTH" ] && CURRENT_LENGTH=0
+                if [ "$CURRENT_LENGTH" -gt "$BASELINE_POST_IMAGE_NOW" ] 2>/dev/null; then
+                    NEW_MESSAGES=$((CURRENT_LENGTH - BASELINE_POST_IMAGE_NOW))
+                    echo -e "  ${GREEN}✅${NC} Backend published $NEW_MESSAGES message(s) to post-image-processing stream"
+                    break
+                fi
+                WAIT_COUNT=$((WAIT_COUNT + 1))
+            done
+            
+            if [ $WAIT_COUNT -eq 10 ]; then
+                echo -e "  ${YELLOW}⚠️${NC}  Backend may not have published messages yet (check backend logs)"
+            fi
+            
+            # Extract media IDs from stream if not in response
+            if [ -z "$TEST_MEDIA_ID_1" ] || [ -z "$TEST_MEDIA_ID_2" ]; then
+                echo "  Extracting media IDs from Redis stream..."
+                sleep 2
+                RECENT_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 5 2>/dev/null | grep -A 10 "postId.*${TEST_POST_ID}" || echo "")
+                if [ -n "$RECENT_MESSAGES" ]; then
+                    TEST_MEDIA_ID_1=$(echo "$RECENT_MESSAGES" | awk '/^postId$/{found=1} found && /^mediaId$/{getline; print; exit}' | head -1 || echo "")
+                    TEST_MEDIA_ID_2=$(echo "$RECENT_MESSAGES" | awk '/^postId$/{found=1} found && /^mediaId$/{getline; print}' | tail -1 || echo "")
+                    if [ -n "$TEST_MEDIA_ID_1" ] && [ -n "$TEST_MEDIA_ID_2" ]; then
+                        echo "  Media IDs extracted: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
+                    fi
+                fi
+            fi
             
         else
             echo -e "  ${RED}❌${NC} Post creation failed (HTTP $HTTP_CODE)"
@@ -442,110 +493,43 @@ EOF
                 TEST_HTTP=$(echo "$TEST_RESPONSE" | tail -1)
                 if [ "$TEST_HTTP" = "200" ]; then
                     echo "  Token is valid for other endpoints, post creation might have different requirements"
+                    echo "  Check backend logs for authentication/authorization errors"
                 else
                     echo "  Token might be invalid or expired (HTTP $TEST_HTTP)"
                 fi
             fi
             
             echo ""
-            echo "  Falling back to direct Redis mode..."
-            TEST_MODE="direct"
+            echo -e "  ${RED}❌${NC} Cannot proceed without successful post creation via API"
+            echo "  Test requires backend API to work properly. Exiting..."
+            exit 1
         fi
     fi
 fi
 
-# If API mode failed or direct mode, use direct Redis publishing
+# If API mode failed, exit (we require API mode for real user flow)
 if [ "$TEST_MODE" != "api" ] || [ -z "$JWT_TOKEN" ]; then
-    echo "Using DIRECT mode: Publishing directly to Redis streams..."
-    echo ""
-    
-    # Verify messages can be published
-    echo "  Testing Redis connection..."
-    # Try to ping Redis (handle both with and without password)
-    REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
-    if [ -z "$REDIS_PING_RESULT" ]; then
-        # Try without password
-        REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | tail -1 || echo "")
-    fi
-
-    if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
-        echo -e "  ${GREEN}✅${NC} Redis connection successful"
-    elif [ -z "$REDIS_PASSWORD" ]; then
-        echo -e "  ${YELLOW}⚠️${NC}  REDIS_PASSWORD not set, trying without password..."
-        # Try without password
-        if docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | grep -q "PONG"; then
-            echo -e "  ${GREEN}✅${NC} Redis connection successful (no password)"
-        else
-            echo -e "  ${RED}❌${NC} Redis connection failed"
-            echo "  Debug: Trying to get password from .env file..."
-            if [ -f ".env" ]; then
-                REDIS_PASSWORD_FROM_ENV=$(grep "^REDIS_PASSWORD=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
-                if [ -n "$REDIS_PASSWORD_FROM_ENV" ]; then
-                    echo "  Found REDIS_PASSWORD in .env, trying again..."
-                    REDIS_PASSWORD="$REDIS_PASSWORD_FROM_ENV"
-                    if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
-                        echo -e "  ${GREEN}✅${NC} Redis connection successful (with password from .env)"
-                    else
-                        echo -e "  ${RED}❌${NC} Redis connection failed even with password from .env"
-                        exit 1
-                    fi
-                else
-                    echo -e "  ${RED}❌${NC} REDIS_PASSWORD not found in .env file"
-                    exit 1
-                fi
-            else
-                echo -e "  ${RED}❌${NC} .env file not found"
-                exit 1
-            fi
-        fi
-    else
-        echo -e "  ${RED}❌${NC} Redis connection failed"
-        echo "  Debug info:"
-        echo "    REDIS_PASSWORD length: ${#REDIS_PASSWORD}"
-        echo "    Redis container: $(docker ps --format '{{.Names}}' | grep redis | head -1)"
-        echo "    Trying direct connection test..."
-        docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
-        exit 1
-    fi
-
-    # Publish messages to post-image-processing (simulating backend)
-    echo "  Publishing media 1 (mediaId=$TEST_MEDIA_ID_1)..."
-    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
-        postId "$TEST_POST_ID" \
-        mediaId "$TEST_MEDIA_ID_1" \
-        mediaUrl "$TEST_IMAGE_1" \
-        uploaderId "$TEST_USER_ID" \
-        correlationId "$TEST_CORRELATION_ID" \
-        >/dev/null 2>&1
-
-    echo "  Publishing media 2 (mediaId=$TEST_MEDIA_ID_2)..."
-    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
-        postId "$TEST_POST_ID" \
-        mediaId "$TEST_MEDIA_ID_2" \
-        mediaUrl "$TEST_IMAGE_2" \
-        uploaderId "$TEST_USER_ID" \
-        correlationId "$TEST_CORRELATION_ID" \
-        >/dev/null 2>&1
-
-    echo -e "${GREEN}✅${NC} Published 2 media items to post-image-processing stream"
-
-    # Verify messages were published
-    echo "  Verifying messages in stream..."
-    STREAM_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-    [ -z "$STREAM_LENGTH" ] && STREAM_LENGTH=0
-    echo "  Stream length: $STREAM_LENGTH messages"
-
-    # Show recent messages
-    echo "  Recent messages in stream:"
-    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
-
-    echo "  Waiting 5 seconds for AI services to start processing..."
-    sleep 5
-
-    # Check AI service logs for any errors
-    echo "  Checking AI service logs for errors..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=20 content_moderation 2>/dev/null | grep -E "ERROR|Exception|Failed" | head -3 || echo "  No errors in content_moderation logs"
+    echo -e "${RED}❌${NC} Test requires API mode with valid authentication"
+    echo "  Cannot proceed without backend API. Exiting..."
+    exit 1
 fi
+
+# Verify we have postId from API
+if [ -z "$TEST_POST_ID" ] || [ "$TEST_POST_ID" = "0" ]; then
+    echo -e "${RED}❌${NC} Test requires valid postId from backend API"
+    echo "  Cannot proceed without postId. Exiting..."
+    exit 1
+fi
+
+# Continue with monitoring the workflow
+echo ""
+echo -e "${GREEN}✅${NC} Post created via backend API. Monitoring workflow..."
+echo "  Post ID: $TEST_POST_ID"
+echo "  Media IDs: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
+echo "  Correlation ID: $TEST_CORRELATION_ID"
+echo ""
+echo "  Waiting 5 seconds for AI services to start processing..."
+sleep 5
 
 echo ""
 echo -e "${BLUE}Step 4: Verify AI Services Processing${NC}"
@@ -656,18 +640,50 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}Step 6: Trigger Post Aggregation${NC}"
-echo "=================================="
+echo -e "${BLUE}Step 6: Wait for Backend to Trigger Post Aggregation${NC}"
+echo "=============================================================="
 
-# Manually trigger aggregation (in case backend didn't)
-echo "Triggering post aggregation manually..."
-docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-aggregation-trigger "*" \
-    postId "$TEST_POST_ID" \
-    action aggregate \
-    correlationId "$TEST_CORRELATION_ID" \
-    >/dev/null 2>&1
+# Wait for backend to trigger aggregation (it should trigger after all media are processed)
+echo "Waiting for backend to trigger post aggregation..."
+echo "  Backend should trigger aggregation after all media for postId=$TEST_POST_ID are processed"
 
-echo "  Waiting 10 seconds for aggregation..."
+# Wait up to 30 seconds for backend to trigger aggregation
+WAIT_COUNT=0
+AGGREGATION_TRIGGERED=0
+while [ $WAIT_COUNT -lt 30 ]; do
+    sleep 2
+    # Check if backend triggered aggregation
+    AGGREGATION_TRIGGERS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-aggregation-trigger + - COUNT 5 2>/dev/null | grep -c "postId.*${TEST_POST_ID}" || echo "0")
+    [ -z "$AGGREGATION_TRIGGERS" ] && AGGREGATION_TRIGGERS=0
+    if [ "$AGGREGATION_TRIGGERS" -gt 0 ] 2>/dev/null; then
+        echo -e "  ${GREEN}✅${NC} Backend triggered aggregation for postId=$TEST_POST_ID"
+        AGGREGATION_TRIGGERED=1
+        break
+    fi
+    WAIT_COUNT=$((WAIT_COUNT + 2))
+    if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
+        echo "  Still waiting... (${WAIT_COUNT}s elapsed)"
+    fi
+done
+
+if [ "$AGGREGATION_TRIGGERED" -eq 0 ]; then
+    echo -e "  ${YELLOW}⚠️${NC}  Backend did not trigger aggregation after 30 seconds"
+    echo "  This may indicate:"
+    echo "    - Backend is still processing media"
+    echo "    - Backend has errors processing media"
+    echo "    - Post may not exist in database (check backend logs)"
+    echo ""
+    echo "  Checking backend logs for aggregation trigger..."
+    BACKEND_AGG_LOG=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "Triggering.*aggregation|All media.*processed|triggerAggregation" | grep -i "$TEST_POST_ID" | tail -3 || echo "")
+    if [ -n "$BACKEND_AGG_LOG" ]; then
+        echo "  Backend aggregation logs:"
+        echo "$BACKEND_AGG_LOG" | sed 's/^/    /'
+    else
+        echo "  No aggregation trigger logs found for postId=$TEST_POST_ID"
+    fi
+fi
+
+echo "  Waiting 10 seconds for aggregation to complete..."
 sleep 10
 
 # Check if aggregation completed
