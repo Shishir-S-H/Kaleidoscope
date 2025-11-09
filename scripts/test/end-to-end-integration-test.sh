@@ -142,18 +142,25 @@ echo ""
 
 # Login and get JWT token
 log_info "Attempting user login..."
-LOGIN_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/auth/login" \
+LOGIN_RESPONSE=$(curl -s -i -X POST "${BASE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"${TEST_EMAIL}\",\"password\":\"${TEST_PASSWORD}\"}")
 
-if echo "$LOGIN_RESPONSE" | grep -q "token"; then
-    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+# Extract token from Authorization header
+JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "authorization:" | grep -o "Bearer [^ ]*" | cut -d' ' -f2)
+
+if [ -n "$JWT_TOKEN" ]; then
+    log_success "User authentication successful"
+    log_info "JWT Token obtained (length: ${#JWT_TOKEN})"
+elif echo "$LOGIN_RESPONSE" | grep -q "success.*true"; then
+    log_warning "Login successful but token not found in header - checking response body..."
+    # Try to extract from response body if available
+    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
     if [ -n "$JWT_TOKEN" ]; then
-        log_success "User authentication successful"
-        log_info "JWT Token obtained (length: ${#JWT_TOKEN})"
+        log_success "JWT Token extracted from response body"
     else
         log_error "Failed to extract JWT token from response"
-        echo "Response: $LOGIN_RESPONSE"
+        echo "Response headers and body: $LOGIN_RESPONSE"
         exit 1
     fi
 else
