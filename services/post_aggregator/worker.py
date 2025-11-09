@@ -334,20 +334,28 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         })
         
         # Publish enriched insights
+        # Convert arrays to JSON strings for backend deserialization
+        # Backend expects JSON strings that it will parse into List<String>
+        all_ai_tags_json = json.dumps(aggregated["allAiTags"]) if aggregated["allAiTags"] else "[]"
+        all_ai_scenes_json = json.dumps(aggregated["allAiScenes"]) if aggregated["allAiScenes"] else "[]"
+        aggregated_tags_json = json.dumps(aggregated["aggregatedTags"]) if aggregated["aggregatedTags"] else "[]"
+        aggregated_scenes_json = json.dumps(aggregated["aggregatedScenes"]) if aggregated["aggregatedScenes"] else "[]"
+        
         result_message = {
             "postId": str(post_id),
             "mediaCount": str(aggregated["mediaCount"]),
-            "allAiTags": json.dumps(aggregated["allAiTags"]),  # Raw collected tags
-            "allAiScenes": json.dumps(aggregated["allAiScenes"]),  # Raw collected scenes
-            "aggregatedTags": json.dumps(aggregated["aggregatedTags"]),
-            "aggregatedScenes": json.dumps(aggregated["aggregatedScenes"]),
+            "allAiTags": all_ai_tags_json,  # JSON string: '["tag1", "tag2"]' or '[]'
+            "allAiScenes": all_ai_scenes_json,  # JSON string: '["scene1", "scene2"]' or '[]'
+            "aggregatedTags": aggregated_tags_json,  # JSON string for consistency
+            "aggregatedScenes": aggregated_scenes_json,  # JSON string for consistency
             "totalFaces": str(aggregated["totalFaces"]),
             "isSafe": "true" if aggregated["isSafe"] else "false",
             "moderationConfidence": str(aggregated["moderationConfidence"]),
             "inferredEventType": aggregated["inferredEventType"],  # Renamed from eventType
             "combinedCaption": aggregated["combinedCaption"],
             "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "correlationId": decoded_data.get("correlationId", "") if 'decoded_data' in locals() else ""
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)
