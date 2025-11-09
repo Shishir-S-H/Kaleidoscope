@@ -408,7 +408,22 @@ EOF
         echo "  Using JWT token: ${JWT_TOKEN:0:30}..."
         echo "  Endpoint: ${BACKEND_API_BASE}/posts"
         
-        # Make the request with verbose error output
+        # Test token with a simple GET request first
+        echo "  Testing token with GET request..."
+        TEST_GET_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BACKEND_API_BASE}/categories?page=0&size=1" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            2>&1)
+        TEST_GET_HTTP=$(echo "$TEST_GET_RESPONSE" | tail -1)
+        if [ "$TEST_GET_HTTP" != "200" ]; then
+            echo -e "  ${RED}❌${NC} Token validation failed (HTTP $TEST_GET_HTTP)"
+            echo "  Token might be invalid or expired"
+            echo "  Response: $(echo "$TEST_GET_RESPONSE" | head -n -1)"
+        else
+            echo -e "  ${GREEN}✅${NC} Token is valid for GET requests"
+        fi
+        
+        # Make the POST request with verbose error output
+        echo "  Making POST request to create post..."
         CREATE_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -422,6 +437,15 @@ EOF
             echo "    Token prefix: ${JWT_TOKEN:0:50}..."
             echo "    Token length: ${#JWT_TOKEN}"
             echo "    Request body size: $(echo "$CREATE_POST_BODY" | wc -c) bytes"
+            echo ""
+            echo "  Checking backend logs for authentication errors..."
+            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 app 2>/dev/null | grep -E "AuthTokenFilter|JWT|Authentication|401|Unauthorized" | tail -5 || echo "")
+            if [ -n "$BACKEND_AUTH_ERRORS" ]; then
+                echo "  Backend authentication logs:"
+                echo "$BACKEND_AUTH_ERRORS" | sed 's/^/    /'
+            else
+                echo "  No recent authentication errors in backend logs"
+            fi
         fi
         
         HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
