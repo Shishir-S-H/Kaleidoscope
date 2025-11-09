@@ -450,10 +450,20 @@ EOF
         # If we have a correlation ID, search for it specifically
         if [ -n "$CORRELATION_ID_FROM_RESPONSE" ]; then
             echo "  Found correlation ID in response: ${CORRELATION_ID_FROM_RESPONSE:0:20}..."
-            CORRELATION_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -i "$CORRELATION_ID_FROM_RESPONSE" | tail -10 || echo "")
+            CORRELATION_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -i "$CORRELATION_ID_FROM_RESPONSE" | tail -20 || echo "")
             if [ -n "$CORRELATION_LOGS" ]; then
                 echo "  Backend logs for this correlation ID:"
                 echo "$CORRELATION_LOGS" | sed 's/^/    /'
+            else
+                echo "  ⚠️  No logs found for this correlation ID"
+                echo "  Trying to find any recent logs with this ID..."
+                # Try without case sensitivity and with partial match
+                CORRELATION_PARTIAL=$(echo "$CORRELATION_ID_FROM_RESPONSE" | cut -d'-' -f1)
+                CORRELATION_LOGS_PARTIAL=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=500 app 2>/dev/null | grep -i "$CORRELATION_PARTIAL" | tail -10 || echo "")
+                if [ -n "$CORRELATION_LOGS_PARTIAL" ]; then
+                    echo "  Found logs with partial correlation ID:"
+                    echo "$CORRELATION_LOGS_PARTIAL" | sed 's/^/    /'
+                fi
             fi
         fi
         
@@ -497,12 +507,32 @@ EOF
             echo ""
             
             # Check for authentication errors specifically
-            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -E "AuthTokenFilter|JWT|Authentication|401|Unauthorized" | tail -10 || echo "")
+            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -E "AuthTokenFilter|JWT|Authentication|401|Unauthorized|Invalid JWT|JWT expired|JWT validation" | tail -15 || echo "")
             if [ -n "$BACKEND_AUTH_ERRORS" ]; then
-                echo "  Backend authentication errors (last 10):"
+                echo "  Backend authentication errors (last 15):"
                 echo "$BACKEND_AUTH_ERRORS" | sed 's/^/    /'
             else
                 echo "  No authentication errors in backend logs"
+            fi
+            
+            # Check for any errors or exceptions in recent logs
+            echo ""
+            echo "  Checking for any recent errors or exceptions..."
+            RECENT_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "ERROR|Exception|Failed|401" | tail -10 || echo "")
+            if [ -n "$RECENT_ERRORS" ]; then
+                echo "  Recent errors/exceptions:"
+                echo "$RECENT_ERRORS" | sed 's/^/    /'
+            fi
+            
+            # Check if AuthTokenFilter is being called for POST requests
+            echo ""
+            echo "  Checking AuthTokenFilter logs for POST requests..."
+            AUTH_FILTER_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -E "AuthTokenFilter.*POST|AuthTokenFilter.*posts|AuthTokenFilter called for URI.*posts" | tail -5 || echo "")
+            if [ -n "$AUTH_FILTER_LOGS" ]; then
+                echo "  AuthTokenFilter logs for POST:"
+                echo "$AUTH_FILTER_LOGS" | sed 's/^/    /'
+            else
+                echo "  No AuthTokenFilter logs found for POST requests"
             fi
         fi
         
