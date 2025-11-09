@@ -7,17 +7,34 @@ echo "============================================================"
 echo ""
 
 # Load passwords from environment or .env file or use defaults
+# Try to load from .env file first (handle BOM/encoding issues)
+load_env_file() {
+    local env_file=$1
+    if [ -f "$env_file" ]; then
+        # Create a temporary cleaned version of the .env file
+        local temp_file=$(mktemp)
+        # Remove BOM, carriage returns, and invalid characters
+        # Use sed to remove CR characters and filter out problematic lines
+        sed 's/\r$//' "$env_file" 2>/dev/null | \
+            grep -v "^#: command not found" | \
+            grep -v "^lthr: command not found" | \
+            grep -v "^[[:space:]]*$" > "$temp_file" 2>/dev/null || true
+        
+        # Source the cleaned file
+        set -a
+        source "$temp_file" 2>/dev/null || true
+        set +a
+        
+        # Clean up temp file
+        rm -f "$temp_file" 2>/dev/null || true
+    fi
+}
+
 # Try to load from .env file first
 if [ -f ".env" ]; then
-    # Source .env file if it exists
-    set -a
-    source .env 2>/dev/null || true
-    set +a
+    load_env_file ".env"
 elif [ -f "../.env" ]; then
-    # Try parent directory
-    set -a
-    source ../.env 2>/dev/null || true
-    set +a
+    load_env_file "../.env"
 fi
 
 # Use environment variable or default
@@ -582,9 +599,35 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
     [ -z "$BACKEND_PENDING" ] && BACKEND_PENDING=0
     echo "  Backend pending messages: $BACKEND_PENDING"
     
+    if [ "$BACKEND_PENDING" -gt 0 ] 2>/dev/null; then
+        echo "  Investigating pending messages..."
+        # Get pending message details
+        PENDING_DETAILS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING ml-insights-results backend-group - + 5 2>/dev/null | grep -v "Warning" || echo "")
+        if [ -n "$PENDING_DETAILS" ]; then
+            echo "  Pending message details (first 5):"
+            echo "$PENDING_DETAILS" | head -5 | sed 's/^/    /'
+        fi
+        
+        # Check backend logs for processing errors
+        BACKEND_PROCESSING_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "ERROR.*ml-insights-results|Exception.*ml-insights-results|Failed to process.*ml-insights" | tail -3 || echo "")
+        if [ -n "$BACKEND_PROCESSING_ERRORS" ]; then
+            echo -e "  ${RED}❌${NC} Backend processing errors:"
+            echo "$BACKEND_PROCESSING_ERRORS" | sed 's/^/    /'
+        fi
+    fi
+    
     # Wait a bit for backend to process
     echo "  Waiting 10 seconds for backend to process..."
     sleep 10
+    
+    # Re-check pending after wait
+    BACKEND_PENDING_AFTER=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING ml-insights-results backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
+    [ -z "$BACKEND_PENDING_AFTER" ] && BACKEND_PENDING_AFTER=0
+    if [ "$BACKEND_PENDING_AFTER" -lt "$BACKEND_PENDING" ] 2>/dev/null; then
+        echo -e "  ${GREEN}✅${NC} Backend is processing messages (pending decreased from $BACKEND_PENDING to $BACKEND_PENDING_AFTER)"
+    elif [ "$BACKEND_PENDING_AFTER" -eq "$BACKEND_PENDING" ] 2>/dev/null && [ "$BACKEND_PENDING" -gt 0 ]; then
+        echo -e "  ${YELLOW}⚠️${NC}  Backend pending messages unchanged (may be stuck)"
+    fi
     
     # Check if backend triggered aggregation
     echo "  Checking if backend triggered post aggregation..."
@@ -594,6 +637,7 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
         echo -e "    ${GREEN}✅${NC} Backend triggered aggregation for postId=$TEST_POST_ID"
     else
         echo -e "    ${YELLOW}⚠️${NC}  Backend did not trigger aggregation (may need real post in database)"
+        echo "    Note: This is expected when using direct Redis mode (post not in database)"
     fi
 else
     echo -e "${YELLOW}⚠️${NC}  Backend not running, skipping backend verification"
@@ -618,11 +662,12 @@ sleep 10
 echo "Checking post aggregation results..."
 wait_for_message "post-insights-enriched" 30
 
-# Verify aggregated message
+# Verify aggregated message (check last 10 messages for our postId)
 echo "Verifying aggregated message format..."
-AGGREGATED_MESSAGE=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 1 2>/dev/null | grep -E "postId|allAiTags|allAiScenes|correlationId" || echo "")
+AGGREGATED_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 10 2>/dev/null || echo "")
+AGGREGATED_MESSAGE=$(echo "$AGGREGATED_MESSAGES" | grep -A 20 "postId.*${TEST_POST_ID}" | head -20 || echo "")
 
-if echo "$AGGREGATED_MESSAGE" | grep -q "postId.*${TEST_POST_ID}"; then
+if [ -n "$AGGREGATED_MESSAGE" ] && echo "$AGGREGATED_MESSAGE" | grep -q "postId.*${TEST_POST_ID}"; then
     echo -e "  ${GREEN}✅${NC} Found aggregated message for postId=$TEST_POST_ID"
     
     # Check format
@@ -643,8 +688,18 @@ if echo "$AGGREGATED_MESSAGE" | grep -q "postId.*${TEST_POST_ID}"; then
     else
         echo -e "  ${YELLOW}⚠️${NC}  Message missing correlationId"
     fi
+    
+    # Show the actual message for debugging
+    echo "  Message preview:"
+    echo "$AGGREGATED_MESSAGE" | grep -E "postId|allAiTags|allAiScenes|correlationId|inferredEventType" | head -5 | sed 's/^/    /'
 else
     echo -e "  ${RED}❌${NC} Aggregated message not found for postId=$TEST_POST_ID"
+    echo "  Checking recent messages in stream..."
+    RECENT_POST_IDS=$(echo "$AGGREGATED_MESSAGES" | grep "postId" | head -5 || echo "")
+    if [ -n "$RECENT_POST_IDS" ]; then
+        echo "  Recent postIds in stream:"
+        echo "$RECENT_POST_IDS" | sed 's/^/    /'
+    fi
 fi
 
 echo ""
@@ -668,10 +723,30 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
         echo -e "  ${YELLOW}⚠️${NC}  Backend did not process enriched insights (check logs for errors)"
     fi
     
-    # Check pending messages
+    # Check pending messages with details
     BACKEND_PENDING=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING post-insights-enriched backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
     [ -z "$BACKEND_PENDING" ] && BACKEND_PENDING=0
     echo "  Backend pending messages: $BACKEND_PENDING"
+    
+    if [ "$BACKEND_PENDING" -gt 0 ] 2>/dev/null; then
+        echo "  Investigating pending messages..."
+        # Get details of pending messages
+        PENDING_DETAILS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING post-insights-enriched backend-group - + 5 2>/dev/null | grep -v "Warning" || echo "")
+        if [ -n "$PENDING_DETAILS" ]; then
+            echo "  Pending message details (first 5):"
+            echo "$PENDING_DETAILS" | head -5 | sed 's/^/    /'
+        fi
+        
+        # Check backend logs for errors
+        echo "  Checking backend logs for errors..."
+        BACKEND_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "ERROR.*post-insights-enriched|Exception.*post-insights-enriched|Cannot construct" | tail -5 || echo "")
+        if [ -n "$BACKEND_ERRORS" ]; then
+            echo -e "  ${RED}❌${NC} Backend errors found:"
+            echo "$BACKEND_ERRORS" | sed 's/^/    /'
+        else
+            echo "  No recent errors in backend logs"
+        fi
+    fi
 else
     echo -e "${YELLOW}⚠️${NC}  Backend not running, skipping backend verification"
 fi
@@ -693,13 +768,26 @@ if [ "$ES_SYNC_MESSAGES" -gt 0 ] 2>/dev/null; then
     echo "  Waiting 10 seconds for ES sync to process..."
     sleep 10
     
-    # Check ES sync logs
-    ES_SYNC_PROCESSED=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 es_sync 2>/dev/null | grep -c "Processing.*sync" || echo "0")
+    # Check ES sync logs for actual processing
+    ES_SYNC_PROCESSED=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 es_sync 2>/dev/null | grep -c "Processing.*sync\|Successfully synced\|Indexed.*to Elasticsearch" || echo "0")
     [ -z "$ES_SYNC_PROCESSED" ] && ES_SYNC_PROCESSED=0
     if [ "$ES_SYNC_PROCESSED" -gt 0 ] 2>/dev/null; then
-        echo -e "  ${GREEN}✅${NC} ES sync is processing messages"
+        echo -e "  ${GREEN}✅${NC} ES sync is processing messages ($ES_SYNC_PROCESSED recent operations)"
     else
         echo -e "  ${YELLOW}⚠️${NC}  ES sync may not be processing (check logs)"
+        # Check for errors
+        ES_SYNC_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 es_sync 2>/dev/null | grep -E "ERROR|Exception|Failed" | tail -3 || echo "")
+        if [ -n "$ES_SYNC_ERRORS" ]; then
+            echo "  ES sync errors:"
+            echo "$ES_SYNC_ERRORS" | sed 's/^/    /'
+        fi
+        
+        # Check if es_sync is actually running
+        if docker ps --format "{{.Names}}" | grep -qE "^es_sync$|kaleidoscope.*es_sync"; then
+            echo "  ES sync container is running"
+        else
+            echo -e "  ${RED}❌${NC} ES sync container is not running"
+        fi
     fi
 else
     echo -e "  ${YELLOW}⚠️${NC}  ES sync queue is empty (backend may not have triggered sync)"
@@ -736,12 +824,28 @@ echo "Checking AI service health checks..."
 HEALTH_CHECKS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=500 2>/dev/null | grep -c "Health check.*healthy" || echo "0")
 echo "  Health check logs found: $HEALTH_CHECKS"
 
-# Check for errors
+# Check for errors with detailed reporting
 echo "Checking for errors in logs..."
 ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 2>/dev/null | grep -E "ERROR|Exception" | grep -v "AuthorizationDeniedException" | grep -v "ServletException" | wc -l)
 echo "  Error count: $ERRORS"
 
-# Check DLQ
+if [ "$ERRORS" -gt 0 ] 2>/dev/null; then
+    echo "  Recent errors by service:"
+    # Check errors per service
+    for service in content_moderation image_tagger scene_recognition image_captioning face_recognition post_aggregator es_sync app; do
+        SERVICE_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 "$service" 2>/dev/null | grep -E "ERROR|Exception" | grep -v "AuthorizationDeniedException" | grep -v "ServletException" | wc -l || echo "0")
+        if [ "$SERVICE_ERRORS" -gt 0 ] 2>/dev/null; then
+            echo "    $service: $SERVICE_ERRORS errors"
+            # Show sample error
+            SAMPLE_ERROR=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 "$service" 2>/dev/null | grep -E "ERROR|Exception" | grep -v "AuthorizationDeniedException" | grep -v "ServletException" | tail -1 || echo "")
+            if [ -n "$SAMPLE_ERROR" ]; then
+                echo "      Sample: $(echo "$SAMPLE_ERROR" | cut -c1-80)..."
+            fi
+        fi
+    done
+fi
+
+# Check DLQ with detailed inspection
 echo "Checking dead letter queue..."
 DLQ_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN ai-processing-dlq 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 [ -z "$DLQ_LENGTH" ] && DLQ_LENGTH=0
@@ -749,7 +853,20 @@ echo "  DLQ length: $DLQ_LENGTH"
 if [ "$DLQ_LENGTH" -eq "0" ] 2>/dev/null; then
     echo -e "  ${GREEN}✅${NC} No messages in DLQ"
 else
-    echo -e "  ${YELLOW}⚠️${NC}  $DLQ_LENGTH messages in DLQ (check logs for details)"
+    echo -e "  ${YELLOW}⚠️${NC}  $DLQ_LENGTH messages in DLQ"
+    echo "  Inspecting DLQ messages (last 3)..."
+    DLQ_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE ai-processing-dlq + - COUNT 3 2>/dev/null | grep -E "serviceName|error|originalMessageId|retryCount" || echo "")
+    if [ -n "$DLQ_MESSAGES" ]; then
+        echo "  DLQ message details:"
+        echo "$DLQ_MESSAGES" | head -12 | sed 's/^/    /'
+        
+        # Check if any DLQ messages are from our test
+        if echo "$DLQ_MESSAGES" | grep -q "${TEST_CORRELATION_ID}\|${TEST_POST_ID}\|${TEST_MEDIA_ID_1}\|${TEST_MEDIA_ID_2}"; then
+            echo -e "  ${RED}❌${NC} Test messages found in DLQ!"
+        fi
+    else
+        echo "  Could not retrieve DLQ message details"
+    fi
 fi
 
 echo ""
