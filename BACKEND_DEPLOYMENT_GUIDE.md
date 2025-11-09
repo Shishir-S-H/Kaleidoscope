@@ -38,8 +38,12 @@ REDIS_PASSWORD=your-redis-password
 # Elasticsearch Configuration (REQUIRED)
 ELASTICSEARCH_PASSWORD=your-elasticsearch-password
 
-# Docker Registry (optional - defaults to rajay04)
+# Docker Registry Configuration
+# DOCKER_REGISTRY is the default registry (used as fallback)
 DOCKER_REGISTRY=rajay04
+# BACKEND_DOCKER_REGISTRY is specific to backend service (optional, falls back to DOCKER_REGISTRY)
+# If your backend image is in a different registry, uncomment and set:
+# BACKEND_DOCKER_REGISTRY=shishir01
 
 # Backend Application (optional - defaults provided)
 APP_VERSION=latest

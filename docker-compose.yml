@@ -178,7 +178,7 @@ services:
         max-file: "3"
 
   app:
-    image: ${DOCKER_REGISTRY:-rajay04}/kaleidoscope:backend-${APP_VERSION:-latest}
+    image: ${BACKEND_DOCKER_REGISTRY:-${DOCKER_REGISTRY:-rajay04}}/kaleidoscope:backend-${APP_VERSION:-latest}
     container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
     restart: unless-stopped
     depends_on:

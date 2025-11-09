@@ -61,8 +61,13 @@ DB_NAME=kaleidoscope
 DB_USER=kaleidoscope_user
 DB_PASSWORD=your-database-password-here
 
-# Backend Application Configuration (optional - defaults provided)
+# Docker Registry Configuration
+# DOCKER_REGISTRY is the default registry (used as fallback)
 DOCKER_REGISTRY=rajay04
+# BACKEND_DOCKER_REGISTRY is specific to backend service (optional, falls back to DOCKER_REGISTRY)
+# BACKEND_DOCKER_REGISTRY=shishir01
+
+# Backend Application Configuration (optional - defaults provided)
 APP_VERSION=latest
 APP_CONTAINER_NAME=kaleidoscope-app
 APP_PORT=8080
