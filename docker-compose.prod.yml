@@ -144,7 +144,7 @@ services:
   app:
     # Backend image from ajayprabhu2004/rajay04 registry
     image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
-    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
+    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-backend}
     restart: unless-stopped
     depends_on:
       redis:
@@ -152,13 +152,17 @@ services:
       elasticsearch:
         condition: service_started
     env_file:
-      - .env
+      - ../.env
     environment:
       # Production overrides - point to internal Docker service names
+      # Override Redis to use internal Docker service name
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      # Override Elasticsearch to use internal Docker service name
       - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
       - SPRING_ELASTICSEARCH_USERNAME=elastic
       - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      # PostgreSQL uses external Neon DB (from .env file)
+      # SPRING_DATASOURCE_URL should be in .env file
     ports:
       - "${APP_PORT:-8080}:8080"
     networks:
