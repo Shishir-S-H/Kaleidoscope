@@ -37,4 +37,3 @@ The Kaleidoscope AI system uses an event-driven microservices architecture:
 - Redis Streams messaging
 - Elasticsearch search
 - PostgreSQL read models
-
