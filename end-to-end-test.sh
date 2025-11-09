@@ -6,7 +6,21 @@ echo "🚀 Kaleidoscope AI Services - End-to-End User Workflow Test"
 echo "============================================================"
 echo ""
 
-# Load passwords from environment or use defaults
+# Load passwords from environment or .env file or use defaults
+# Try to load from .env file first
+if [ -f ".env" ]; then
+    # Source .env file if it exists
+    set -a
+    source .env 2>/dev/null || true
+    set +a
+elif [ -f "../.env" ]; then
+    # Try parent directory
+    set -a
+    source ../.env 2>/dev/null || true
+    set +a
+fi
+
+# Use environment variable or default
 REDIS_PASSWORD=${REDIS_PASSWORD:-kaleidoscope1-reddis}
 ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-kaleidoscope1-elastic}
 BACKEND_URL=${BACKEND_URL:-http://localhost:8080}
@@ -212,10 +226,50 @@ echo "Simulating backend publishing to post-image-processing stream..."
 
 # Verify messages can be published
 echo "  Testing Redis connection..."
-if docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>/dev/null | grep -q "PONG"; then
+# Try to ping Redis (handle both with and without password)
+REDIS_PING_RESULT=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
+if [ -z "$REDIS_PING_RESULT" ]; then
+    # Try without password
+    REDIS_PING_RESULT=$(docker exec redis redis-cli PING 2>&1 | tail -1 || echo "")
+fi
+
+if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
     echo -e "  ${GREEN}✅${NC} Redis connection successful"
+elif [ -z "$REDIS_PASSWORD" ]; then
+    echo -e "  ${YELLOW}⚠️${NC}  REDIS_PASSWORD not set, trying without password..."
+    # Try without password
+    if docker exec redis redis-cli PING 2>&1 | grep -q "PONG"; then
+        echo -e "  ${GREEN}✅${NC} Redis connection successful (no password)"
+    else
+        echo -e "  ${RED}❌${NC} Redis connection failed"
+        echo "  Debug: Trying to get password from .env file..."
+        if [ -f ".env" ]; then
+            REDIS_PASSWORD_FROM_ENV=$(grep "^REDIS_PASSWORD=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || echo "")
+            if [ -n "$REDIS_PASSWORD_FROM_ENV" ]; then
+                echo "  Found REDIS_PASSWORD in .env, trying again..."
+                REDIS_PASSWORD="$REDIS_PASSWORD_FROM_ENV"
+                if docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
+                    echo -e "  ${GREEN}✅${NC} Redis connection successful (with password from .env)"
+                else
+                    echo -e "  ${RED}❌${NC} Redis connection failed even with password from .env"
+                    exit 1
+                fi
+            else
+                echo -e "  ${RED}❌${NC} REDIS_PASSWORD not found in .env file"
+                exit 1
+            fi
+        else
+            echo -e "  ${RED}❌${NC} .env file not found"
+            exit 1
+        fi
+    fi
 else
     echo -e "  ${RED}❌${NC} Redis connection failed"
+    echo "  Debug info:"
+    echo "    REDIS_PASSWORD length: ${#REDIS_PASSWORD}"
+    echo "    Redis container: $(docker ps --format '{{.Names}}' | grep redis | head -1)"
+    echo "    Trying direct connection test..."
+    docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
     exit 1
 fi
 
