@@ -6,11 +6,12 @@ Syncs data from PostgreSQL read models to Elasticsearch indices.
 
 import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
-import time
 
 # Add parent directories to path for shared imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -35,15 +36,42 @@ CONSUMER_NAME = "es-sync-worker-1"
 # Elasticsearch configuration
 ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 
-# Index mapping
+# PostgreSQL configuration
+# Try to parse from SPRING_DATASOURCE_URL first, then fall back to individual variables
+SPRING_DATASOURCE_URL = os.getenv("SPRING_DATASOURCE_URL", "")
+if SPRING_DATASOURCE_URL:
+    # Parse JDBC URL: jdbc:postgresql://host:port/database?params
+    match = re.match(r'jdbc:postgresql://([^:/]+)(?::(\d+))?/([^?]+)', SPRING_DATASOURCE_URL)
+    if match:
+        DB_HOST = match.group(1)
+        DB_PORT = int(match.group(2)) if match.group(2) else 5432
+        DB_NAME = match.group(3)
+        DB_USER = os.getenv("DB_USERNAME") or os.getenv("DB_USER", "postgres")
+        DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+    else:
+        # Fall back to individual variables
+        DB_HOST = os.getenv("DB_HOST", "localhost")
+        DB_PORT = int(os.getenv("DB_PORT", "5432"))
+        DB_NAME = os.getenv("DB_NAME", "kaleidoscope")
+        DB_USER = os.getenv("DB_USERNAME") or os.getenv("DB_USER", "postgres")
+        DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+else:
+    # Use individual variables
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = int(os.getenv("DB_PORT", "5432"))
+    DB_NAME = os.getenv("DB_NAME", "kaleidoscope")
+    DB_USER = os.getenv("DB_USERNAME") or os.getenv("DB_USER", "postgres")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+
+# Index mapping: indexType -> (table_name, es_index_name)
 INDEX_MAPPING = {
-    "media_search": "media_search",
-    "post_search": "post_search",
-    "user_search": "user_search",
-    "face_search": "face_search",
-    "recommendations_knn": "recommendations_knn",
-    "feed_personalized": "feed_personalized",
-    "known_faces_index": "known_faces_index"
+    "media_search": ("read_model_media_search", "media_search"),
+    "post_search": ("read_model_post_search", "post_search"),
+    "user_search": ("read_model_user_search", "user_search"),
+    "face_search": ("read_model_face_search", "face_search"),
+    "recommendations_knn": ("read_model_recommendations_knn", "recommendations_knn"),
+    "feed_personalized": ("read_model_feed_personalized", "feed_personalized"),
+    "known_faces_index": ("read_model_known_faces", "known_faces_index")
 }
 
 # Retry configuration
@@ -69,6 +97,111 @@ class ElasticsearchSyncHandler:
         except Exception as e:
             self.logger.error(f"Failed to connect to Elasticsearch: {e}")
             self.es_client = None
+        
+        # Initialize PostgreSQL connection
+        self.pg_conn = None
+        self._init_postgresql()
+    
+    def _init_postgresql(self):
+        """Initialize PostgreSQL connection."""
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            
+            self.pg_conn = psycopg2.connect(
+                host=DB_HOST,
+                port=DB_PORT,
+                database=DB_NAME,
+                user=DB_USER,
+                password=DB_PASSWORD
+            )
+            self.logger.info("Connected to PostgreSQL", extra={
+                "host": DB_HOST,
+                "port": DB_PORT,
+                "database": DB_NAME
+            })
+        except ImportError:
+            self.logger.error("psycopg2 package not installed. Run: pip install psycopg2-binary")
+            self.pg_conn = None
+        except Exception as e:
+            self.logger.error(f"Failed to connect to PostgreSQL: {e}", extra={
+                "host": DB_HOST,
+                "port": DB_PORT,
+                "database": DB_NAME
+            })
+            self.pg_conn = None
+    
+    def read_from_postgresql(self, table_name: str, document_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Read data from PostgreSQL read model table.
+        
+        Args:
+            table_name: Name of the read model table
+            document_id: Document ID (primary key value)
+            
+        Returns:
+            Dictionary with row data or None if not found
+        """
+        if not self.pg_conn:
+            self.logger.error("PostgreSQL connection not available")
+            return None
+        
+        try:
+            import psycopg2.extras
+            
+            # Determine primary key column name based on table
+            pk_column = self._get_primary_key_column(table_name)
+            
+            with self.pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s'
+                cursor.execute(query, (document_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    # Convert RealDictRow to regular dict
+                    data = dict(row)
+                    self.logger.info("Read data from PostgreSQL", extra={
+                        "table": table_name,
+                        "document_id": document_id,
+                        "columns": list(data.keys())
+                    })
+                    return data
+                else:
+                    self.logger.warning("Document not found in PostgreSQL", extra={
+                        "table": table_name,
+                        "document_id": document_id
+                    })
+                    return None
+                    
+        except Exception as e:
+            self.logger.exception("Error reading from PostgreSQL", extra={
+                "table": table_name,
+                "document_id": document_id,
+                "error": str(e)
+            })
+            return None
+    
+    def _get_primary_key_column(self, table_name: str) -> str:
+        """
+        Get primary key column name for a table.
+        
+        Args:
+            table_name: Table name
+            
+        Returns:
+            Primary key column name
+        """
+        # Map table names to their primary key columns
+        pk_mapping = {
+            "read_model_media_search": "media_id",
+            "read_model_post_search": "post_id",
+            "read_model_user_search": "user_id",
+            "read_model_face_search": "face_id",
+            "read_model_recommendations_knn": "user_id",
+            "read_model_feed_personalized": "user_id",
+            "read_model_known_faces": "face_id"
+        }
+        return pk_mapping.get(table_name, "id")
     
     def sync_document(self, index_name: str, document_id: str, document: Dict[str, Any], 
                      retry_count: int = 0) -> bool:
@@ -204,9 +337,63 @@ def parse_vector_field(value: Any) -> Optional[list]:
     return None
 
 
+def map_postgresql_to_elasticsearch(table_name: str, pg_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Map PostgreSQL read model data to Elasticsearch document format.
+    
+    Args:
+        table_name: PostgreSQL table name
+        pg_data: Data from PostgreSQL
+        
+    Returns:
+        Elasticsearch document format
+    """
+    es_doc = {}
+    
+    # Common mappings for all tables
+    for key, value in pg_data.items():
+        # Convert snake_case to camelCase for ES
+        es_key = _snake_to_camel(key)
+        
+        # Handle array fields (PostgreSQL arrays)
+        if isinstance(value, list):
+            es_doc[es_key] = value
+        # Handle JSON string fields
+        elif isinstance(value, str) and (key.endswith("_embedding") or "embedding" in key.lower()):
+            # Try to parse as JSON array
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    es_doc[es_key] = parsed
+                else:
+                    es_doc[es_key] = value
+            except (json.JSONDecodeError, TypeError):
+                es_doc[es_key] = value
+        # Handle boolean fields
+        elif isinstance(value, bool):
+            es_doc[es_key] = value
+        # Handle numeric fields
+        elif isinstance(value, (int, float)):
+            es_doc[es_key] = value
+        # Handle None/null
+        elif value is None:
+            es_doc[es_key] = None
+        # Default: keep as string
+        else:
+            es_doc[es_key] = str(value) if value is not None else None
+    
+    return es_doc
+
+
+def _snake_to_camel(snake_str: str) -> str:
+    """Convert snake_case to camelCase."""
+    components = snake_str.split('_')
+    return components[0] + ''.join(x.capitalize() for x in components[1:])
+
+
 def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncHandler):
     """
-    Handle ES sync message.
+    Handle ES sync message - reads from PostgreSQL read model tables.
     
     Args:
         message_id: Redis Stream message ID
@@ -218,9 +405,8 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         decoded_data = decode_message(data)
         
         operation = decoded_data.get("operation", "index")  # index or delete
-        index_type = decoded_data.get("indexType")  # Which read model
+        index_type = decoded_data.get("indexType")  # Which read model (e.g., "media_search")
         document_id = decoded_data.get("documentId")
-        document_data_str = decoded_data.get("documentData", "{}")
         
         LOGGER.info("Received sync message", extra={
             "message_id": message_id,
@@ -230,47 +416,57 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         })
         
         if not index_type or not document_id:
-            LOGGER.error("Invalid message format", extra={"data": decoded_data})
+            LOGGER.error("Invalid message format - missing indexType or documentId", extra={"data": decoded_data})
             return
         
-        # Get ES index name
-        index_name = INDEX_MAPPING.get(index_type)
-        if not index_name:
-            LOGGER.error(f"Unknown index type: {index_type}")
+        # Get table name and ES index name
+        mapping = INDEX_MAPPING.get(index_type)
+        if not mapping:
+            LOGGER.error(f"Unknown index type: {index_type}", extra={"available_types": list(INDEX_MAPPING.keys())})
             return
+        
+        table_name, es_index_name = mapping
         
         # Handle operation
         if operation == "delete":
-            success = sync_handler.delete_document(index_name, document_id)
+            success = sync_handler.delete_document(es_index_name, document_id)
         else:
-            # Parse document data
-            document_data = json.loads(document_data_str) if isinstance(document_data_str, str) else document_data_str
+            # Read data from PostgreSQL read model table
+            pg_data = sync_handler.read_from_postgresql(table_name, document_id)
+            
+            if not pg_data:
+                LOGGER.error("Failed to read data from PostgreSQL", extra={
+                    "table": table_name,
+                    "document_id": document_id
+                })
+                return
+            
+            # Map PostgreSQL data to Elasticsearch format
+            es_document = map_postgresql_to_elasticsearch(table_name, pg_data)
             
             # Parse vector fields if present
-            if "embedding" in document_data:
-                document_data["embedding"] = parse_vector_field(document_data["embedding"])
-            if "imageEmbedding" in document_data:
-                document_data["imageEmbedding"] = parse_vector_field(document_data["imageEmbedding"])
-            if "textEmbedding" in document_data:
-                document_data["textEmbedding"] = parse_vector_field(document_data["textEmbedding"])
-            if "faceEmbedding" in document_data:
-                document_data["faceEmbedding"] = parse_vector_field(document_data["faceEmbedding"])
+            for field in ["embedding", "imageEmbedding", "textEmbedding", "faceEmbedding"]:
+                if field in es_document:
+                    es_document[field] = parse_vector_field(es_document[field])
             
-            success = sync_handler.sync_document(index_name, document_id, document_data)
+            # Sync to Elasticsearch
+            success = sync_handler.sync_document(es_index_name, document_id, es_document)
         
         if success:
             LOGGER.info("Sync completed successfully", extra={
-                "index": index_name,
+                "index": es_index_name,
                 "document_id": document_id,
-                "operation": operation
+                "operation": operation,
+                "table": table_name
             })
         else:
             LOGGER.error("Sync failed", extra={
-                "index": index_name,
+                "index": es_index_name,
                 "document_id": document_id,
-                "operation": operation
+                "operation": operation,
+                "table": table_name
             })
-        
+            
     except Exception as e:
         LOGGER.exception("Error processing sync message", extra={
             "error": str(e),

@@ -189,6 +189,60 @@ echo "Disk Space:"
 df -h | grep -E "/$|/var" | awk '{print $1 ": " $3 "/" $2 " (" $5 " used)"}'
 
 echo ""
+echo -e "${BLUE}Step 15: Test ES Sync PostgreSQL Connection${NC}"
+echo "Testing ES Sync service PostgreSQL connection..."
+
+# Load DB credentials from environment
+DB_HOST=${DB_HOST:-localhost}
+DB_PORT=${DB_PORT:-5432}
+DB_NAME=${DB_NAME:-kaleidoscope}
+DB_USER=${DB_USER:-postgres}
+DB_PASSWORD=${DB_PASSWORD:-}
+
+if [ -z "$DB_PASSWORD" ]; then
+    echo -e "${YELLOW}⚠️  DB_PASSWORD not set - skipping PostgreSQL connection test${NC}"
+    echo "Set DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD in .env file to test PostgreSQL connection"
+else
+    echo "Testing PostgreSQL connection..."
+    if docker exec es_sync python -c "
+import psycopg2
+import sys
+try:
+    conn = psycopg2.connect(
+        host='${DB_HOST}',
+        port=${DB_PORT},
+        database='${DB_NAME}',
+        user='${DB_USER}',
+        password='${DB_PASSWORD}'
+    )
+    print('✅ PostgreSQL connection successful')
+    cursor = conn.cursor()
+    # Test reading from a read model table
+    cursor.execute(\"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'read_model_%' LIMIT 1\")
+    tables = cursor.fetchall()
+    if tables:
+        print(f'✅ Found read model tables: {tables[0][0]}')
+    else:
+        print('⚠️  No read model tables found (backend may not have created them yet)')
+    cursor.close()
+    conn.close()
+except Exception as e:
+    print(f'❌ PostgreSQL connection failed: {e}')
+    sys.exit(1)
+" 2>/dev/null; then
+        echo -e "${GREEN}✅ ES Sync PostgreSQL connection test passed${NC}"
+    else
+        echo -e "${RED}❌ ES Sync PostgreSQL connection test failed${NC}"
+        echo "Check DB credentials in .env file"
+    fi
+fi
+
+echo ""
+echo -e "${BLUE}Step 16: Test ES Sync Service${NC}"
+echo "ES Sync service logs (recent):"
+docker-compose -f docker-compose.prod.yml logs --tail=20 es_sync | grep -E "Connected to PostgreSQL|PostgreSQL connection|Received sync message|Sync completed|ERROR|error" || echo "No recent logs"
+
+echo ""
 echo -e "${GREEN}✅ Comprehensive Test Complete${NC}"
 echo ""
 echo "Connection details for backend team:"

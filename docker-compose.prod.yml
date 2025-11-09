@@ -130,6 +130,16 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
+      # PostgreSQL connection (Neon DB) - from .env file
+      # Can use SPRING_DATASOURCE_URL or individual DB variables
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      # Fallback individual variables (if SPRING_DATASOURCE_URL not set)
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
     depends_on:
       - redis
       - elasticsearch

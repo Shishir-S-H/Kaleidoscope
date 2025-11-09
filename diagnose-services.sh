@@ -96,5 +96,31 @@ echo "Face Detection Results:"
 docker exec redis redis-cli -a ${REDIS_PASSWORD} XREAD STREAMS face-detection-results 0 | grep -A10 $TEST_MEDIA_ID || echo "No results found"
 
 echo ""
+echo -e "${BLUE}Step 9: Check ES Sync PostgreSQL Connection${NC}"
+echo "Checking ES Sync service PostgreSQL connection..."
+# Load DB credentials from environment (if available)
+DB_HOST=${DB_HOST:-localhost}
+DB_PORT=${DB_PORT:-5432}
+DB_NAME=${DB_NAME:-kaleidoscope}
+DB_USER=${DB_USER:-postgres}
+DB_PASSWORD=${DB_PASSWORD:-}
+
+if [ -z "$DB_PASSWORD" ]; then
+    echo -e "${YELLOW}⚠️  DB_PASSWORD not set - skipping PostgreSQL connection test${NC}"
+    echo "Set DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD in .env file to test PostgreSQL connection"
+else
+    if docker exec es_sync python -c "import psycopg2; conn = psycopg2.connect(host='${DB_HOST}', port=${DB_PORT}, database='${DB_NAME}', user='${DB_USER}', password='${DB_PASSWORD}'); print('✅ PostgreSQL connection successful'); conn.close()" 2>/dev/null; then
+        echo -e "${GREEN}✅ ES Sync can connect to PostgreSQL${NC}"
+    else
+        echo -e "${YELLOW}⚠️  ES Sync PostgreSQL connection test failed${NC}"
+    fi
+fi
+
+echo ""
+echo -e "${BLUE}Step 10: Check ES Sync Service Status${NC}"
+echo "ES Sync logs (recent):"
+docker-compose -f docker-compose.prod.yml logs --tail=10 es_sync | grep -E "Connected to PostgreSQL|PostgreSQL connection|Received sync message|Sync completed|ERROR|error" || echo "No recent logs"
+
+echo ""
 echo -e "${GREEN}✅ Diagnostic Complete${NC}"
 
