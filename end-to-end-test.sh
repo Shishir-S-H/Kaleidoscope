@@ -544,12 +544,31 @@ EOF
                     echo "$FULL_LOGS" | sed 's/^/    /'
                 else
                     echo "  No logs found for correlation ID: $CORRELATION_ID_FROM_RESPONSE"
-                    echo "  Showing recent backend logs (last 30 lines) instead:"
-                    RECENT_FULL=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=30 app 2>/dev/null || echo "")
+                    echo "  Searching for recent POST /posts requests..."
+                    # Search for POST requests to /posts endpoint
+                    POST_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -E "POST.*posts|/posts|posts.*401|Unauthorized.*posts" | tail -10 || echo "")
+                    if [ -n "$POST_LOGS" ]; then
+                        echo "  Recent POST /posts logs:"
+                        echo "$POST_LOGS" | sed 's/^/    /'
+                    fi
+                    echo ""
+                    echo "  Showing recent backend logs (last 50 lines) instead:"
+                    RECENT_FULL=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 app 2>/dev/null || echo "")
                     if [ -n "$RECENT_FULL" ]; then
                         echo "$RECENT_FULL" | sed 's/^/    /'
                     fi
                 fi
+            fi
+            
+            # Also check for any authentication-related logs around the time of the request
+            echo ""
+            echo "  Checking for authentication-related logs (last 100 lines)..."
+            AUTH_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "JWT|Authentication|AuthTokenFilter|Unauthorized|401|Invalid JWT|JWT expired|JWT validation" | tail -20 || echo "")
+            if [ -n "$AUTH_LOGS" ]; then
+                echo "  Authentication-related logs:"
+                echo "$AUTH_LOGS" | sed 's/^/    /'
+            else
+                echo "  No authentication-related logs found (might be at DEBUG level)"
             fi
         fi
         
