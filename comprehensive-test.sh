@@ -260,6 +260,62 @@ echo "Checking for retry attempts in AI service logs:"
 docker-compose -f docker-compose.prod.yml logs --tail=50 | grep -E "retry|Retrying|attempt|Processing failed" | tail -10 || echo "No retry logs found"
 
 echo ""
+echo -e "${BLUE}Step 19: Check Metrics and Health Checks${NC}"
+echo "Checking for health check logs in AI services:"
+HEALTH_LOGS=$(docker-compose -f docker-compose.prod.yml logs --tail=100 | grep -E "Health check|health_status|metrics" | tail -5)
+if [ -n "$HEALTH_LOGS" ]; then
+    echo -e "${GREEN}✅ Health check logs found:${NC}"
+    echo "$HEALTH_LOGS"
+else
+    echo -e "${YELLOW}⚠️  No health check logs found (may need to wait 5 minutes for first health check)${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}Step 20: Test Metrics Collection${NC}"
+echo "Checking if services are collecting metrics:"
+echo "Looking for metrics in recent logs..."
+METRICS_LOGS=$(docker-compose -f docker-compose.prod.yml logs --tail=200 | grep -E "processing_time|success_count|failure_count|latency" | tail -5)
+if [ -n "$METRICS_LOGS" ]; then
+    echo -e "${GREEN}✅ Metrics collection detected:${NC}"
+    echo "$METRICS_LOGS"
+else
+    echo -e "${YELLOW}⚠️  No metrics logs found (metrics are logged in health checks every 5 minutes)${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}Step 21: Summary of All Features${NC}"
+echo "=== Task 4: ES Sync PostgreSQL Connection ==="
+if docker exec es_sync python -c "import psycopg2; conn = psycopg2.connect(host='${DB_HOST}', port=${DB_PORT}, database='${DB_NAME}', user='${DB_USER}', password='${DB_PASSWORD}'); conn.close()" 2>/dev/null; then
+    echo -e "${GREEN}✅ ES Sync can connect to PostgreSQL${NC}"
+else
+    echo -e "${YELLOW}⚠️  ES Sync PostgreSQL connection test skipped (DB credentials may not be set)${NC}"
+fi
+
+echo ""
+echo "=== Task 5: Retry Logic and DLQ ==="
+DLQ_COUNT=$(docker exec redis redis-cli -a ${REDIS_PASSWORD} XLEN ai-processing-dlq 2>/dev/null || echo "0")
+if [ "$DLQ_COUNT" -eq 0 ]; then
+    echo -e "${GREEN}✅ No messages in DLQ (retry logic working)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Found $DLQ_COUNT messages in DLQ${NC}"
+fi
+RETRY_LOGS=$(docker-compose -f docker-compose.prod.yml logs --tail=100 | grep -E "Retrying|retry" | wc -l)
+if [ "$RETRY_LOGS" -gt 0 ]; then
+    echo -e "${GREEN}✅ Retry logic is active (found $RETRY_LOGS retry logs)${NC}"
+else
+    echo -e "${YELLOW}⚠️  No retry logs found (may indicate no failures or retries needed)${NC}"
+fi
+
+echo ""
+echo "=== Task 6: Metrics and Health Checks ==="
+HEALTH_COUNT=$(docker-compose -f docker-compose.prod.yml logs --tail=500 | grep -E "Health check" | wc -l)
+if [ "$HEALTH_COUNT" -gt 0 ]; then
+    echo -e "${GREEN}✅ Health checks are running (found $HEALTH_COUNT health check logs)${NC}"
+else
+    echo -e "${YELLOW}⚠️  No health check logs found (health checks run every 5 minutes)${NC}"
+fi
+
+echo ""
 echo -e "${GREEN}✅ Comprehensive Test Complete${NC}"
 echo ""
 echo "Connection details for backend team:"

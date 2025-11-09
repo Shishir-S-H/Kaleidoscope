@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+import threading
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
@@ -20,6 +21,8 @@ from shared.utils.logger import get_logger
 from shared.redis_streams import RedisStreamPublisher, RedisStreamConsumer
 from shared.redis_streams.utils import decode_message
 from shared.utils.retry import retry_with_backoff, publish_to_dlq
+from shared.utils.metrics import record_processing_time, record_success, record_failure, record_retry, record_dlq, get_metrics, ProcessingTimer
+from shared.utils.health import check_health
 
 # Initialize logger
 LOGGER = get_logger("image-captioning")
@@ -122,6 +125,7 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
     """
     decoded_data = None
     retry_count = 0
+    start_time = time.time()
     
     try:
         # Decode message data
@@ -203,12 +207,18 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                     "correlation_id": correlation_id
                 })
                 
+                # Record success metrics
+                processing_time = time.time() - start_time
+                record_processing_time(processing_time)
+                record_success()
+                
                 # Success - exit retry loop
                 return
                 
             except (requests.RequestException, requests.Timeout, ConnectionError, ValueError) as e:
                 last_exception = e
                 if attempt < MAX_RETRIES:
+                    record_retry()  # Record retry attempt
                     LOGGER.warning(f"Processing failed (attempt {attempt + 1}/{MAX_RETRIES + 1}): {str(e)}. Retrying in {delay:.2f} seconds...", extra={
                         "media_id": media_id,
                         "attempt": attempt + 1,
@@ -226,6 +236,11 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             raise last_exception
             
     except Exception as e:
+        # Record failure metrics
+        processing_time = time.time() - start_time
+        record_processing_time(processing_time)
+        record_failure(str(e))
+        
         LOGGER.exception("Error processing message after all retries", extra={
             "error": str(e),
             "message_id": message_id,
@@ -235,6 +250,7 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         
         # Publish to dead letter queue
         try:
+            record_dlq()  # Record DLQ message
             publish_to_dlq(
                 publisher=publisher,
                 dlq_stream=STREAM_DLQ,
@@ -284,6 +300,24 @@ def main():
         # Define handler with publisher bound
         def message_handler(message_id: str, data: dict):
             handle_message(message_id, data, publisher)
+        
+        # Start periodic health check logging (every 5 minutes)
+        def health_check_loop():
+            while True:
+                time.sleep(300)  # 5 minutes
+                try:
+                    metrics = get_metrics()
+                    health = check_health(metrics, "image-captioning")
+                    LOGGER.info("Health check", extra={
+                        "health_status": health["status"],
+                        "metrics": metrics,
+                        "health_checks": health["checks"]
+                    })
+                except Exception as e:
+                    LOGGER.exception("Error in health check", extra={"error": str(e)})
+        
+        health_check_thread = threading.Thread(target=health_check_loop, daemon=True)
+        health_check_thread.start()
         
         LOGGER.info("Worker ready - waiting for messages")
         

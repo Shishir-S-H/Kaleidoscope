@@ -134,5 +134,28 @@ else
 fi
 
 echo ""
+echo -e "${BLUE}Step 12: Check Retry Logic${NC}"
+echo "Checking for retry attempts in AI service logs:"
+RETRY_COUNT=$(docker-compose -f docker-compose.prod.yml logs --tail=100 | grep -E "Retrying|retry" | wc -l)
+if [ "$RETRY_COUNT" -gt 0 ]; then
+    echo -e "${GREEN}✅ Retry logic is active (found $RETRY_COUNT retry logs)${NC}"
+    docker-compose -f docker-compose.prod.yml logs --tail=50 | grep -E "Retrying|retry" | tail -3
+else
+    echo -e "${YELLOW}⚠️  No retry logs found (may indicate no failures or retries needed)${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}Step 13: Check Metrics and Health Checks${NC}"
+echo "Checking for health check logs:"
+HEALTH_COUNT=$(docker-compose -f docker-compose.prod.yml logs --tail=200 | grep -E "Health check" | wc -l)
+if [ "$HEALTH_COUNT" -gt 0 ]; then
+    echo -e "${GREEN}✅ Health checks are running (found $HEALTH_COUNT health check logs)${NC}"
+    echo "Recent health check:"
+    docker-compose -f docker-compose.prod.yml logs --tail=200 | grep -E "Health check" | tail -1
+else
+    echo -e "${YELLOW}⚠️  No health check logs found (health checks run every 5 minutes)${NC}"
+fi
+
+echo ""
 echo -e "${GREEN}✅ Diagnostic Complete${NC}"
 
