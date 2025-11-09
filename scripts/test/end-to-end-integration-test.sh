@@ -26,9 +26,11 @@ TEST_PASSWORD="${TEST_PASSWORD:-User@123}"
 # Test data
 TEST_POST_TITLE="E2E Test Post $(date +%s)"
 TEST_POST_DESCRIPTION="End-to-end integration test post"
+# Note: Media URLs must be Cloudinary URLs from the upload signature flow
+# For testing, we'll use existing Cloudinary URLs or generate upload signatures first
 TEST_IMAGE_URLS=(
-    "https://picsum.photos/800/600?random=1"
-    "https://picsum.photos/800/600?random=2"
+    "https://res.cloudinary.com/dkadqnp9j/image/upload/v1/kaleidoscope/posts/test-image-1"
+    "https://res.cloudinary.com/dkadqnp9j/image/upload/v1/kaleidoscope/posts/test-image-2"
 )
 
 # Results tracking
@@ -185,7 +187,7 @@ echo -e "${BLUE}=== PHASE 3: Post Creation ===${NC}"
 echo ""
 
 # Create post with images
-log_info "Creating post with ${#TEST_IMAGE_URLS[@]} images..."
+log_info "Creating post with images..."
 
 # First, get a category ID (required field)
 log_info "Fetching categories to get a valid category ID..."
@@ -203,6 +205,49 @@ if [ -z "$CATEGORY_ID" ]; then
     CATEGORY_ID=1
 else
     log_success "Using category ID: ${CATEGORY_ID}"
+fi
+
+# Generate upload signatures to get valid Cloudinary URLs
+log_info "Generating upload signatures for test images..."
+SIGNATURE_REQUEST='{"contentType":"POST","fileNames":["test-image-1.jpg","test-image-2.jpg"]}'
+SIGNATURE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/posts/generate-upload-signatures" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${JWT_TOKEN}" \
+    -d "$SIGNATURE_REQUEST")
+
+# Extract Cloudinary URLs from signature response
+if echo "$SIGNATURE_RESPONSE" | grep -q "kaleidoscope/posts"; then
+    log_success "Upload signatures generated successfully"
+    # Extract URLs from signatures (they should be in the response)
+    # For now, we'll construct URLs from publicId
+    # Format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/kaleidoscope/posts/{publicId}
+    CLOUD_NAME="dkadqnp9j"
+    
+    # Extract publicIds from signature response
+    PUBLIC_ID_1=$(echo "$SIGNATURE_RESPONSE" | grep -o '"publicId":"[^"]*' | head -1 | cut -d'"' -f4)
+    PUBLIC_ID_2=$(echo "$SIGNATURE_RESPONSE" | grep -o '"publicId":"[^"]*' | head -2 | tail -1 | cut -d'"' -f4)
+    
+    if [ -n "$PUBLIC_ID_1" ] && [ -n "$PUBLIC_ID_2" ]; then
+        TEST_IMAGE_URLS=(
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/${PUBLIC_ID_1}"
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/${PUBLIC_ID_2}"
+        )
+        log_info "Using generated Cloudinary URLs: ${TEST_IMAGE_URLS[0]:0:80}..."
+    else
+        log_warning "Could not extract publicIds from signature response, using fallback URLs"
+        # Fallback: use existing URLs if available (from previous test runs)
+        TEST_IMAGE_URLS=(
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/kaleidoscope/posts/test-image-1"
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/kaleidoscope/posts/test-image-2"
+        )
+    fi
+else
+    log_warning "Failed to generate upload signatures, using fallback URLs"
+    CLOUD_NAME="dkadqnp9j"
+    TEST_IMAGE_URLS=(
+        "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/kaleidoscope/posts/test-image-1"
+        "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/kaleidoscope/posts/test-image-2"
+    )
 fi
 
 # Build mediaDetails array (required format)
