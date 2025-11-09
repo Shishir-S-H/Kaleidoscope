@@ -35,6 +35,10 @@ else
     echo -e "${YELLOW}⚠️${NC}  docker-compose.prod.yml not found, using default path"
 fi
 
+# Find Redis container name (do this after checking services are running)
+# This will be set in Step 1 after services are verified
+REDIS_CONTAINER=""
+
 # Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -86,7 +90,7 @@ wait_for_message() {
     local count=0
     echo -n "  Waiting for message in $stream..."
     while [ $count -lt $timeout ]; do
-        local length=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN "$stream" 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]')
+        local length=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN "$stream" 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]')
         # Handle empty string or non-numeric values
         if [ -z "$length" ] || [ "$length" = "" ]; then
             length=0
@@ -108,7 +112,7 @@ check_message_in_stream() {
     local stream=$1
     local field=$2
     local value=$3
-    local found=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 10 2>/dev/null | grep -E "${field}|${value}" | grep -c "$value" || echo "0")
+    local found=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 10 2>/dev/null | grep -E "${field}|${value}" | grep -c "$value" || echo "0")
     if [ "$found" -gt 0 ]; then
         echo -e "    ${GREEN}✅${NC} Found message with $field=$value"
         return 0
@@ -126,7 +130,7 @@ verify_ai_service_processed() {
     echo -n "  Checking $service processed mediaId=$media_id..."
     
     # Check if message exists in output stream
-    local found=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 20 2>/dev/null | grep -c "mediaId.*${media_id}" || echo "0")
+    local found=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE "$stream" + - COUNT 20 2>/dev/null | grep -c "mediaId.*${media_id}" || echo "0")
     # Handle empty string
     if [ -z "$found" ] || [ "$found" = "" ]; then
         found=0
@@ -151,18 +155,29 @@ docker ps --format "  {{.Names}}" | grep -E "redis|elasticsearch|content_moderat
 echo ""
 echo "Checking required services..."
 
-# Check Redis
-if docker ps --format "{{.Names}}" | grep -qE "^redis$|kaleidoscope.*redis"; then
-    echo -e "${GREEN}✅${NC} Redis is running"
+# Check Redis and set container name
+REDIS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -E "^redis$|kaleidoscope.*redis" | head -1)
+if [ -n "$REDIS_CONTAINER" ]; then
+    echo -e "${GREEN}✅${NC} Redis is running (container: $REDIS_CONTAINER)"
 else
     echo -e "${RED}❌${NC} Redis is not running"
     echo "  Starting Redis..."
     docker-compose -f "$DOCKER_COMPOSE_FILE" up -d redis >/dev/null 2>&1
     sleep 3
-    if docker ps --format "{{.Names}}" | grep -qE "^redis$|kaleidoscope.*redis"; then
-        echo -e "${GREEN}✅${NC} Redis started successfully"
+    REDIS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -E "^redis$|kaleidoscope.*redis" | head -1)
+    if [ -n "$REDIS_CONTAINER" ]; then
+        echo -e "${GREEN}✅${NC} Redis started successfully (container: $REDIS_CONTAINER)"
     else
         echo -e "${RED}❌${NC} Failed to start Redis"
+        exit 1
+    fi
+fi
+
+# Ensure REDIS_CONTAINER is set
+if [ -z "$REDIS_CONTAINER" ]; then
+    REDIS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -E "^redis$|kaleidoscope.*redis" | head -1)
+    if [ -z "$REDIS_CONTAINER" ]; then
+        echo -e "${RED}❌${NC} Redis container not found"
         exit 1
     fi
 fi
@@ -192,10 +207,10 @@ echo "======================"
 
 # Get baseline stream lengths
 echo "Recording baseline stream lengths..."
-BASELINE_POST_IMAGE=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-BASELINE_ML_INSIGHTS=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN ml-insights-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-BASELINE_FACE_DETECTION=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN face-detection-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-BASELINE_POST_ENRICHED=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-insights-enriched 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+BASELINE_POST_IMAGE=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+BASELINE_ML_INSIGHTS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN ml-insights-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+BASELINE_FACE_DETECTION=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN face-detection-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+BASELINE_POST_ENRICHED=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-insights-enriched 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 
 # Ensure baseline values are numeric
 [ -z "$BASELINE_POST_IMAGE" ] && BASELINE_POST_IMAGE=0
@@ -212,11 +227,11 @@ echo ""
 echo -e "${BLUE}Step 2.5: Ensure Consumer Groups Exist${NC}"
 echo "======================================"
 echo "Creating consumer groups for AI services..."
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing content-moderation-group 0 MKSTREAM >/dev/null 2>&1 || true
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing image-tagger-group 0 MKSTREAM >/dev/null 2>&1 || true
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing scene-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing image-captioning-group 0 MKSTREAM >/dev/null 2>&1 || true
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing face-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing content-moderation-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing image-tagger-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing scene-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing image-captioning-group 0 MKSTREAM >/dev/null 2>&1 || true
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE post-image-processing face-recognition-group 0 MKSTREAM >/dev/null 2>&1 || true
 echo -e "${GREEN}✅${NC} Consumer groups created/verified"
 
 echo ""
@@ -227,10 +242,10 @@ echo "Simulating backend publishing to post-image-processing stream..."
 # Verify messages can be published
 echo "  Testing Redis connection..."
 # Try to ping Redis (handle both with and without password)
-REDIS_PING_RESULT=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
+REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | tail -1 || echo "")
 if [ -z "$REDIS_PING_RESULT" ]; then
     # Try without password
-    REDIS_PING_RESULT=$(docker exec redis redis-cli PING 2>&1 | tail -1 || echo "")
+    REDIS_PING_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | tail -1 || echo "")
 fi
 
 if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
@@ -238,7 +253,7 @@ if echo "$REDIS_PING_RESULT" | grep -q "PONG"; then
 elif [ -z "$REDIS_PASSWORD" ]; then
     echo -e "  ${YELLOW}⚠️${NC}  REDIS_PASSWORD not set, trying without password..."
     # Try without password
-    if docker exec redis redis-cli PING 2>&1 | grep -q "PONG"; then
+    if docker exec "$REDIS_CONTAINER" redis-cli PING 2>&1 | grep -q "PONG"; then
         echo -e "  ${GREEN}✅${NC} Redis connection successful (no password)"
     else
         echo -e "  ${RED}❌${NC} Redis connection failed"
@@ -248,7 +263,7 @@ elif [ -z "$REDIS_PASSWORD" ]; then
             if [ -n "$REDIS_PASSWORD_FROM_ENV" ]; then
                 echo "  Found REDIS_PASSWORD in .env, trying again..."
                 REDIS_PASSWORD="$REDIS_PASSWORD_FROM_ENV"
-                if docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
+                if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 | grep -v "Warning" | grep -q "PONG"; then
                     echo -e "  ${GREEN}✅${NC} Redis connection successful (with password from .env)"
                 else
                     echo -e "  ${RED}❌${NC} Redis connection failed even with password from .env"
@@ -269,13 +284,13 @@ else
     echo "    REDIS_PASSWORD length: ${#REDIS_PASSWORD}"
     echo "    Redis container: $(docker ps --format '{{.Names}}' | grep redis | head -1)"
     echo "    Trying direct connection test..."
-    docker exec redis redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
+    docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" PING 2>&1 || true
     exit 1
 fi
 
 # Publish messages to post-image-processing (simulating backend)
 echo "  Publishing media 1 (mediaId=$TEST_MEDIA_ID_1)..."
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
     postId "$TEST_POST_ID" \
     mediaId "$TEST_MEDIA_ID_1" \
     mediaUrl "$TEST_IMAGE_1" \
@@ -284,7 +299,7 @@ docker exec redis redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*
     >/dev/null 2>&1
 
 echo "  Publishing media 2 (mediaId=$TEST_MEDIA_ID_2)..."
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-image-processing "*" \
     postId "$TEST_POST_ID" \
     mediaId "$TEST_MEDIA_ID_2" \
     mediaUrl "$TEST_IMAGE_2" \
@@ -296,13 +311,13 @@ echo -e "${GREEN}✅${NC} Published 2 media items to post-image-processing strea
 
 # Verify messages were published
 echo "  Verifying messages in stream..."
-STREAM_LENGTH=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+STREAM_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 [ -z "$STREAM_LENGTH" ] && STREAM_LENGTH=0
 echo "  Stream length: $STREAM_LENGTH messages"
 
 # Show recent messages
 echo "  Recent messages in stream:"
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-image-processing + - COUNT 2 2>/dev/null | grep -E "postId|mediaId|mediaUrl" | head -6 || echo "  No messages found"
 
 echo "  Waiting 5 seconds for AI services to start processing..."
 sleep 5
@@ -351,7 +366,7 @@ echo "====================================="
 # Check if backend consumed messages (if running)
 if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
     echo "Checking backend consumer status..."
-    BACKEND_PENDING=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XPENDING ml-insights-results backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
+    BACKEND_PENDING=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING ml-insights-results backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
     [ -z "$BACKEND_PENDING" ] && BACKEND_PENDING=0
     echo "  Backend pending messages: $BACKEND_PENDING"
     
@@ -361,7 +376,7 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
     
     # Check if backend triggered aggregation
     echo "  Checking if backend triggered post aggregation..."
-    AGGREGATION_TRIGGERS=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-aggregation-trigger + - COUNT 5 2>/dev/null | grep -c "postId.*${TEST_POST_ID}" || echo "0")
+    AGGREGATION_TRIGGERS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-aggregation-trigger + - COUNT 5 2>/dev/null | grep -c "postId.*${TEST_POST_ID}" || echo "0")
     [ -z "$AGGREGATION_TRIGGERS" ] && AGGREGATION_TRIGGERS=0
     if [ "$AGGREGATION_TRIGGERS" -gt 0 ] 2>/dev/null; then
         echo -e "    ${GREEN}✅${NC} Backend triggered aggregation for postId=$TEST_POST_ID"
@@ -378,7 +393,7 @@ echo "=================================="
 
 # Manually trigger aggregation (in case backend didn't)
 echo "Triggering post aggregation manually..."
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XADD post-aggregation-trigger "*" \
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XADD post-aggregation-trigger "*" \
     postId "$TEST_POST_ID" \
     action aggregate \
     correlationId "$TEST_CORRELATION_ID" \
@@ -393,7 +408,7 @@ wait_for_message "post-insights-enriched" 30
 
 # Verify aggregated message
 echo "Verifying aggregated message format..."
-AGGREGATED_MESSAGE=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 1 2>/dev/null | grep -E "postId|allAiTags|allAiScenes|correlationId" || echo "")
+AGGREGATED_MESSAGE=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 1 2>/dev/null | grep -E "postId|allAiTags|allAiScenes|correlationId" || echo "")
 
 if echo "$AGGREGATED_MESSAGE" | grep -q "postId.*${TEST_POST_ID}"; then
     echo -e "  ${GREEN}✅${NC} Found aggregated message for postId=$TEST_POST_ID"
@@ -442,7 +457,7 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
     fi
     
     # Check pending messages
-    BACKEND_PENDING=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XPENDING post-insights-enriched backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
+    BACKEND_PENDING=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XPENDING post-insights-enriched backend-group 2>/dev/null | head -1 | grep -v "Warning" | tr -d '[:space:]' || echo "0")
     [ -z "$BACKEND_PENDING" ] && BACKEND_PENDING=0
     echo "  Backend pending messages: $BACKEND_PENDING"
 else
@@ -455,7 +470,7 @@ echo "===================="
 
 # Check if ES sync was triggered
 echo "Checking ES sync queue..."
-ES_SYNC_MESSAGES=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN es-sync-queue 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+ES_SYNC_MESSAGES=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN es-sync-queue 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 [ -z "$ES_SYNC_MESSAGES" ] && ES_SYNC_MESSAGES=0
 echo "  ES sync queue length: $ES_SYNC_MESSAGES"
 
@@ -515,7 +530,7 @@ echo "  Error count: $ERRORS"
 
 # Check DLQ
 echo "Checking dead letter queue..."
-DLQ_LENGTH=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN ai-processing-dlq 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+DLQ_LENGTH=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN ai-processing-dlq 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 [ -z "$DLQ_LENGTH" ] && DLQ_LENGTH=0
 echo "  DLQ length: $DLQ_LENGTH"
 if [ "$DLQ_LENGTH" -eq "0" ] 2>/dev/null; then
@@ -529,10 +544,10 @@ echo -e "${BLUE}Step 11: Final Stream Statistics${NC}"
 echo "=================================="
 
 # Get final stream lengths
-FINAL_POST_IMAGE=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-FINAL_ML_INSIGHTS=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN ml-insights-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-FINAL_FACE_DETECTION=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN face-detection-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
-FINAL_POST_ENRICHED=$(docker exec redis redis-cli -a "${REDIS_PASSWORD}" XLEN post-insights-enriched 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+FINAL_POST_IMAGE=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-image-processing 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+FINAL_ML_INSIGHTS=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN ml-insights-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+FINAL_FACE_DETECTION=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN face-detection-results 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
+FINAL_POST_ENRICHED=$(docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XLEN post-insights-enriched 2>/dev/null | grep -v "Warning" | tail -1 | tr -d '[:space:]' || echo "0")
 
 # Ensure final values are numeric
 [ -z "$FINAL_POST_IMAGE" ] && FINAL_POST_IMAGE=0
@@ -552,11 +567,11 @@ echo "================================="
 
 # Check consumer group status
 echo "Checking consumer group status..."
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS post-image-processing 2>/dev/null | grep -E "name|consumers|pending|lag" | head -20
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS post-image-processing 2>/dev/null | grep -E "name|consumers|pending|lag" | head -20
 echo ""
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS ml-insights-results 2>/dev/null | grep -E "name|consumers|pending|lag" | head -10
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS ml-insights-results 2>/dev/null | grep -E "name|consumers|pending|lag" | head -10
 echo ""
-docker exec redis redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS post-insights-enriched 2>/dev/null | grep -E "name|consumers|pending|lag" | head -10
+docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XINFO GROUPS post-insights-enriched 2>/dev/null | grep -E "name|consumers|pending|lag" | head -10
 
 echo ""
 echo -e "${BLUE}Step 13: Test Summary${NC}"
@@ -581,7 +596,7 @@ if verify_ai_service_processed "face-recognition" "$TEST_MEDIA_ID_2" "face-detec
 
 # Check aggregation
 TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
-if docker exec redis redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 1 2>/dev/null | grep -q "postId.*${TEST_POST_ID}"; then
+if docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XREVRANGE post-insights-enriched + - COUNT 1 2>/dev/null | grep -q "postId.*${TEST_POST_ID}"; then
     SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
 fi
 
