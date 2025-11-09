@@ -11,6 +11,16 @@ REDIS_PASSWORD=${REDIS_PASSWORD:-kaleidoscope1-reddis}
 ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-kaleidoscope1-elastic}
 BACKEND_URL=${BACKEND_URL:-http://localhost:8080}
 
+# Docker compose file path (try different locations)
+if [ -f "docker-compose.prod.yml" ]; then
+    DOCKER_COMPOSE_FILE="docker-compose.prod.yml"
+elif [ -f "../docker-compose.prod.yml" ]; then
+    DOCKER_COMPOSE_FILE="../docker-compose.prod.yml"
+else
+    DOCKER_COMPOSE_FILE="docker-compose.prod.yml"
+    echo -e "${YELLOW}⚠️${NC}  docker-compose.prod.yml not found, using default path"
+fi
+
 # Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -40,8 +50,14 @@ echo ""
 # Function to check service health
 check_service_health() {
     local service=$1
-    if docker ps --format "{{.Names}}" | grep -q "^${service}$"; then
+    # Check if container exists and is running (flexible matching)
+    if docker ps --format "{{.Names}}" | grep -qE "^${service}$|^kaleidoscope-${service}"; then
         echo -e "${GREEN}✅${NC} $service is running"
+        return 0
+    elif docker ps --format "{{.Names}}" | grep -qi "${service}"; then
+        # Container exists with different name
+        local actual_name=$(docker ps --format "{{.Names}}" | grep -i "${service}" | head -1)
+        echo -e "${GREEN}✅${NC} $service is running (as $actual_name)"
         return 0
     else
         echo -e "${RED}❌${NC} $service is not running"
@@ -107,16 +123,46 @@ echo "================================"
 
 # Check all services are running
 echo "Checking service health..."
-check_service_health "redis" || exit 1
-check_service_health "elasticsearch" || exit 1
-check_service_health "content_moderation" || exit 1
-check_service_health "image_tagger" || exit 1
-check_service_health "scene_recognition" || exit 1
-check_service_health "image_captioning" || exit 1
-check_service_health "face_recognition" || exit 1
-check_service_health "post_aggregator" || exit 1
-check_service_health "es_sync" || exit 1
-check_service_health "kaleidoscope-app" || echo -e "${YELLOW}⚠️${NC}  Backend not running (will test AI services only)"
+echo "Available containers:"
+docker ps --format "  {{.Names}}" | grep -E "redis|elasticsearch|content_moderation|image_tagger|scene_recognition|image_captioning|face_recognition|post_aggregator|es_sync|app" || echo "  No matching containers found"
+
+echo ""
+echo "Checking required services..."
+
+# Check Redis
+if docker ps --format "{{.Names}}" | grep -qE "^redis$|kaleidoscope.*redis"; then
+    echo -e "${GREEN}✅${NC} Redis is running"
+else
+    echo -e "${RED}❌${NC} Redis is not running"
+    echo "  Starting Redis..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d redis >/dev/null 2>&1
+    sleep 3
+    if docker ps --format "{{.Names}}" | grep -qE "^redis$|kaleidoscope.*redis"; then
+        echo -e "${GREEN}✅${NC} Redis started successfully"
+    else
+        echo -e "${RED}❌${NC} Failed to start Redis"
+        exit 1
+    fi
+fi
+
+# Check Elasticsearch
+if docker ps --format "{{.Names}}" | grep -qE "^elasticsearch$|kaleidoscope.*elasticsearch"; then
+    echo -e "${GREEN}✅${NC} Elasticsearch is running"
+else
+    echo -e "${YELLOW}⚠️${NC}  Elasticsearch is not running (will start it)"
+    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d elasticsearch >/dev/null 2>&1
+    sleep 5
+fi
+
+# Check AI services
+check_service_health "content_moderation" || echo -e "${YELLOW}⚠️${NC}  content_moderation not running"
+check_service_health "image_tagger" || echo -e "${YELLOW}⚠️${NC}  image_tagger not running"
+check_service_health "scene_recognition" || echo -e "${YELLOW}⚠️${NC}  scene_recognition not running"
+check_service_health "image_captioning" || echo -e "${YELLOW}⚠️${NC}  image_captioning not running"
+check_service_health "face_recognition" || echo -e "${YELLOW}⚠️${NC}  face_recognition not running"
+check_service_health "post_aggregator" || echo -e "${YELLOW}⚠️${NC}  post_aggregator not running"
+check_service_health "es_sync" || echo -e "${YELLOW}⚠️${NC}  es_sync not running"
+check_service_health "kaleidoscope-app" || check_service_health "app" || echo -e "${YELLOW}⚠️${NC}  Backend not running (will test AI services only)"
 
 echo ""
 echo -e "${BLUE}Step 2: Baseline State${NC}"
@@ -282,7 +328,7 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
     sleep 15
     
     # Check backend logs for processing
-    BACKEND_PROCESSED=$(docker-compose -f docker-compose.prod.yml logs --tail=100 app 2>/dev/null | grep -c "Successfully processed post-insights-enriched.*postId.*${TEST_POST_ID}" || echo "0")
+    BACKEND_PROCESSED=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -c "Successfully processed post-insights-enriched.*postId.*${TEST_POST_ID}" || echo "0")
     if [ "$BACKEND_PROCESSED" -gt 0 ]; then
         echo -e "  ${GREEN}✅${NC} Backend processed enriched insights for postId=$TEST_POST_ID"
     else
@@ -313,7 +359,7 @@ if [ "$ES_SYNC_MESSAGES" -gt 0 ]; then
     sleep 10
     
     # Check ES sync logs
-    ES_SYNC_PROCESSED=$(docker-compose -f docker-compose.prod.yml logs --tail=50 es_sync 2>/dev/null | grep -c "Processing.*sync" || echo "0")
+    ES_SYNC_PROCESSED=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 es_sync 2>/dev/null | grep -c "Processing.*sync" || echo "0")
     if [ "$ES_SYNC_PROCESSED" -gt 0 ]; then
         echo -e "  ${GREEN}✅${NC} ES sync is processing messages"
     else
@@ -350,12 +396,12 @@ echo "=========================================="
 
 # Check AI service health
 echo "Checking AI service health checks..."
-HEALTH_CHECKS=$(docker-compose -f docker-compose.prod.yml logs --tail=500 2>/dev/null | grep -c "Health check.*healthy" || echo "0")
+HEALTH_CHECKS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=500 2>/dev/null | grep -c "Health check.*healthy" || echo "0")
 echo "  Health check logs found: $HEALTH_CHECKS"
 
 # Check for errors
 echo "Checking for errors in logs..."
-ERRORS=$(docker-compose -f docker-compose.prod.yml logs --tail=200 2>/dev/null | grep -E "ERROR|Exception" | grep -v "AuthorizationDeniedException" | grep -v "ServletException" | wc -l)
+ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 2>/dev/null | grep -E "ERROR|Exception" | grep -v "AuthorizationDeniedException" | grep -v "ServletException" | wc -l)
 echo "  Error count: $ERRORS"
 
 # Check DLQ
