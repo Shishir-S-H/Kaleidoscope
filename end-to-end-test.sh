@@ -295,22 +295,37 @@ if [ "$TEST_MODE" = "api" ]; then
         -d "{\"email\":\"${TEST_USER_EMAIL}\",\"password\":\"${TEST_USER_PASSWORD}\"}" \
         2>&1)
     
-    # Extract JWT token from Authorization header (backend returns it in header)
-    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "^authorization:" | sed 's/.*Bearer //' | tr -d '\r' | tr -d ' ' || echo "")
+    # Check HTTP status code
+    HTTP_STATUS=$(echo "$LOGIN_RESPONSE" | grep -i "^HTTP" | head -1 | awk '{print $2}' || echo "")
+    
+    if [ "$HTTP_STATUS" != "200" ]; then
+        echo -e "  ${RED}❌${NC} Authentication failed (HTTP $HTTP_STATUS)"
+        echo "  Response: $LOGIN_RESPONSE"
+        echo ""
+        echo -e "  ${RED}❌${NC} Cannot proceed without authentication. Exiting..."
+        exit 1
+    fi
+    
+    # Extract JWT token from Authorization header (backend returns it in header as "Authorization: Bearer <token>")
+    # JWT tokens contain: a-z, A-Z, 0-9, ., -, _, +, /, = (base64 characters)
+    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "^authorization:" | sed 's/.*[Bb]earer //' | tr -d '\r' | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+    
     if [ -z "$JWT_TOKEN" ]; then
         # Try to extract from response body as fallback
         JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4 || echo "")
     fi
     
     if [ -z "$JWT_TOKEN" ]; then
-        echo -e "  ${RED}❌${NC} Authentication failed"
-        echo "  Response: $LOGIN_RESPONSE"
+        echo -e "  ${RED}❌${NC} Authentication failed - token not found"
+        echo "  Response headers:"
+        echo "$LOGIN_RESPONSE" | grep -i "authorization\|http" | head -5
         echo ""
-        echo "  Falling back to direct Redis mode..."
-        TEST_MODE="direct"
+        echo -e "  ${RED}❌${NC} Cannot proceed without authentication. Exiting..."
+        exit 1
     else
         echo -e "  ${GREEN}✅${NC} Authentication successful"
-        echo "  Token: ${JWT_TOKEN:0:20}..."
+        echo "  Token: ${JWT_TOKEN:0:30}..."
+        echo "  Token length: ${#JWT_TOKEN} characters"
     fi
     
     if [ "$TEST_MODE" = "api" ] && [ -n "$JWT_TOKEN" ]; then
@@ -391,11 +406,23 @@ EOF
         
         echo "  Creating post with 2 images..."
         echo "  Using JWT token: ${JWT_TOKEN:0:30}..."
+        echo "  Endpoint: ${BACKEND_API_BASE}/posts"
+        
+        # Make the request with verbose error output
         CREATE_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$CREATE_POST_BODY" \
             2>&1)
+        
+        # Debug: Show request details if it fails
+        if echo "$CREATE_POST_RESPONSE" | tail -1 | grep -q "401"; then
+            echo "  Debug: Request details:"
+            echo "    URL: ${BACKEND_API_BASE}/posts"
+            echo "    Token prefix: ${JWT_TOKEN:0:50}..."
+            echo "    Token length: ${#JWT_TOKEN}"
+            echo "    Request body size: $(echo "$CREATE_POST_BODY" | wc -c) bytes"
+        fi
         
         HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
         POST_RESPONSE_BODY=$(echo "$CREATE_POST_RESPONSE" | head -n -1)
