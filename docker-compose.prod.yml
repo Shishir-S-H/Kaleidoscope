@@ -144,7 +144,7 @@ services:
   app:
     # Backend image from ajayprabhu2004/rajay04 registry
     image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
-    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-backend}
+    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
     restart: unless-stopped
     depends_on:
       redis:
@@ -152,17 +152,31 @@ services:
       elasticsearch:
         condition: service_started
     env_file:
-      - ../.env
+      - .env
     environment:
       # Production overrides - point to internal Docker service names
-      # Override Redis to use internal Docker service name
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      # Override Elasticsearch to use internal Docker service name
       - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
       - SPRING_ELASTICSEARCH_USERNAME=elastic
       - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      # PostgreSQL uses external Neon DB (from .env file)
-      # SPRING_DATASOURCE_URL should be in .env file
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      # PostgreSQL (Neon DB) - from .env file
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      # Spring Boot configs - from .env file
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-production}
+      - CONTEXT_PATH=${CONTEXT_PATH:-/kaleidoscope}
+      - APP_BASE_URL=${APP_BASE_URL}
+      # Other configs from .env
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
     ports:
       - "${APP_PORT:-8080}:8080"
     networks:
