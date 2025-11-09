@@ -75,6 +75,7 @@ FILE_SIZE_THRESHOLD=2KB
 Your complete `.env` file should have:
 
 1. **AI Services Variables** (already in your file):
+
    - `HF_API_TOKEN`
    - `HF_API_URL_*`
    - `REDIS_PASSWORD`
@@ -105,12 +106,14 @@ Your complete `.env` file should have:
 ## 🚀 After Adding Variables
 
 1. Restart the backend service:
+
    ```bash
    cd ~/Kaleidoscope/kaleidoscope-ai
    docker-compose -f docker-compose.prod.yml restart app
    ```
 
 2. Check logs:
+
    ```bash
    docker-compose -f docker-compose.prod.yml logs app --tail=50
    ```
@@ -123,4 +126,3 @@ Your complete `.env` file should have:
 ---
 
 **Last Updated**: 2025-01-15
-
