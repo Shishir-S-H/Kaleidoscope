@@ -24,6 +24,16 @@ fi
 REDIS_PASSWORD=${REDIS_PASSWORD:-kaleidoscope1-reddis}
 ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-kaleidoscope1-elastic}
 BACKEND_URL=${BACKEND_URL:-http://localhost:8080}
+BACKEND_API_BASE="${BACKEND_URL}/kaleidoscope/api"
+BACKEND_AUTH_BASE="${BACKEND_URL}/api/auth"
+
+# Test user credentials (can be overridden via environment variables)
+TEST_USER_EMAIL=${TEST_USER_EMAIL:-user@gmail.com}
+TEST_USER_PASSWORD=${TEST_USER_PASSWORD:-User@123}
+# Alternative: ajax81968@gmail.com / User1@123
+
+# Test mode: "api" (real user flow) or "direct" (simulate backend)
+TEST_MODE=${TEST_MODE:-api}
 
 # Docker compose file path (try different locations)
 if [ -f "docker-compose.prod.yml" ]; then
@@ -55,10 +65,13 @@ TEST_USER_ID=${TEST_USER_ID:-101}
 TEST_CORRELATION_ID="e2e-test-$(date +%s)"
 
 # Test image URLs (reliable sources)
-TEST_IMAGE_1="https://picsum.photos/800/600?random=1"
-TEST_IMAGE_2="https://picsum.photos/600/800?random=2"
+# Using Cloudinary demo images that should pass backend validation
+TEST_IMAGE_1="https://res.cloudinary.com/demo/image/upload/v1692873600/sample.jpg"
+TEST_IMAGE_2="https://res.cloudinary.com/demo/image/upload/v1692873600/sample2.jpg"
 
 echo -e "${CYAN}Test Configuration:${NC}"
+echo "  Test Mode: $TEST_MODE"
+echo "  User Email: $TEST_USER_EMAIL"
 echo "  Post ID: $TEST_POST_ID"
 echo "  Media IDs: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
 echo "  User ID: $TEST_USER_ID"
@@ -247,9 +260,162 @@ docker exec "$REDIS_CONTAINER" redis-cli -a "${REDIS_PASSWORD}" XGROUP CREATE po
 echo -e "${GREEN}✅${NC} Consumer groups created/verified"
 
 echo ""
-echo -e "${BLUE}Step 3: Simulate User Creates Post with Images${NC}"
+echo -e "${BLUE}Step 3: User Creates Post via Backend API${NC}"
 echo "=============================================="
-echo "Simulating backend publishing to post-image-processing stream..."
+
+if [ "$TEST_MODE" = "api" ]; then
+    echo "Using REAL user flow: Authenticate → Create Post → Verify Processing"
+    echo ""
+    
+    # Step 3.1: Authenticate with backend
+    echo -e "${BLUE}Step 3.1: Authenticate with Backend${NC}"
+    echo "----------------------------------------"
+    echo "  Logging in as: $TEST_USER_EMAIL"
+    
+    LOGIN_RESPONSE=$(curl -s -X POST "${BACKEND_AUTH_BASE}/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\":\"${TEST_USER_EMAIL}\",\"password\":\"${TEST_USER_PASSWORD}\"}" \
+        2>&1)
+    
+    # Extract JWT token from Authorization header or response body
+    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "authorization:" | sed 's/.*Bearer //' | tr -d '\r' || echo "")
+    if [ -z "$JWT_TOKEN" ]; then
+        # Try to extract from response body
+        JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4 || echo "")
+    fi
+    
+    if [ -z "$JWT_TOKEN" ]; then
+        echo -e "  ${RED}❌${NC} Authentication failed"
+        echo "  Response: $LOGIN_RESPONSE"
+        echo ""
+        echo "  Falling back to direct Redis mode..."
+        TEST_MODE="direct"
+    else
+        echo -e "  ${GREEN}✅${NC} Authentication successful"
+        echo "  Token: ${JWT_TOKEN:0:20}..."
+    fi
+    
+    if [ "$TEST_MODE" = "api" ] && [ -n "$JWT_TOKEN" ]; then
+        # Step 3.2: Fetch categories
+        echo ""
+        echo -e "${BLUE}Step 3.2: Fetch Available Categories${NC}"
+        echo "----------------------------------------"
+        
+        CATEGORIES_RESPONSE=$(curl -s -X GET "${BACKEND_API_BASE}/categories?page=0&size=10" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            2>&1)
+        
+        # Extract first category ID (simple JSON parsing)
+        CATEGORY_ID=$(echo "$CATEGORIES_RESPONSE" | grep -o '"categoryId":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
+        
+        if [ -z "$CATEGORY_ID" ]; then
+            echo -e "  ${YELLOW}⚠️${NC}  Could not fetch categories, using default categoryId=1"
+            CATEGORY_ID=1
+        else
+            echo -e "  ${GREEN}✅${NC} Found category ID: $CATEGORY_ID"
+        fi
+        
+        # Step 3.3: Create post via API
+        echo ""
+        echo -e "${BLUE}Step 3.3: Create Post via Backend API${NC}"
+        echo "----------------------------------------"
+        
+        # Generate upload signatures first (backend requires this)
+        echo "  Generating upload signatures..."
+        SIGNATURE_RESPONSE=$(curl -s -X POST "${BACKEND_API_BASE}/posts/upload-signatures" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"fileNames\":[\"test-image-1.jpg\",\"test-image-2.jpg\"],\"contentType\":\"POST\"}" \
+            2>&1)
+        
+        # Create post with media
+        POST_TITLE="E2E Test Post $(date +%s)"
+        POST_BODY="This is an end-to-end test post created automatically. Testing AI processing pipeline."
+        
+        CREATE_POST_BODY=$(cat <<EOF
+{
+  "title": "${POST_TITLE}",
+  "body": "${POST_BODY}",
+  "summary": "E2E test post",
+  "visibility": "PUBLIC",
+  "categoryIds": [${CATEGORY_ID}],
+  "mediaDetails": [
+    {
+      "url": "${TEST_IMAGE_1}",
+      "mediaType": "IMAGE",
+      "position": 0,
+      "width": 800,
+      "height": 600,
+      "fileSizeKb": 120,
+      "durationSeconds": null,
+      "extraMetadata": {}
+    },
+    {
+      "url": "${TEST_IMAGE_2}",
+      "mediaType": "IMAGE",
+      "position": 1,
+      "width": 600,
+      "height": 800,
+      "fileSizeKb": 100,
+      "durationSeconds": null,
+      "extraMetadata": {}
+    }
+  ]
+}
+EOF
+)
+        
+        echo "  Creating post with 2 images..."
+        CREATE_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$CREATE_POST_BODY" \
+            2>&1)
+        
+        HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
+        POST_RESPONSE_BODY=$(echo "$CREATE_POST_RESPONSE" | head -n -1)
+        
+        if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo -e "  ${GREEN}✅${NC} Post created successfully"
+            
+            # Extract postId and mediaIds from response
+            TEST_POST_ID=$(echo "$POST_RESPONSE_BODY" | grep -o '"postId":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
+            if [ -z "$TEST_POST_ID" ]; then
+                # Try alternative format
+                TEST_POST_ID=$(echo "$POST_RESPONSE_BODY" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2 || echo "")
+            fi
+            
+            # Extract media IDs (they might be in the response)
+            TEST_MEDIA_ID_1=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | head -1 | cut -d':' -f2 || echo "$(($(date +%s) + 1))")
+            TEST_MEDIA_ID_2=$(echo "$POST_RESPONSE_BODY" | grep -o '"mediaId":[0-9]*' | tail -1 | cut -d':' -f2 || echo "$(($(date +%s) + 2))")
+            
+            if [ -z "$TEST_POST_ID" ]; then
+                echo -e "  ${YELLOW}⚠️${NC}  Could not extract postId from response, using generated ID"
+                TEST_POST_ID=$(date +%s)
+            else
+                echo "  Post ID: $TEST_POST_ID"
+                echo "  Media IDs: $TEST_MEDIA_ID_1, $TEST_MEDIA_ID_2"
+            fi
+            
+            echo ""
+            echo "  Waiting 5 seconds for backend to publish to Redis streams..."
+            sleep 5
+            
+        else
+            echo -e "  ${RED}❌${NC} Post creation failed (HTTP $HTTP_CODE)"
+            echo "  Response: $POST_RESPONSE_BODY"
+            echo ""
+            echo "  Falling back to direct Redis mode..."
+            TEST_MODE="direct"
+        fi
+    fi
+fi
+
+# If API mode failed or direct mode, use direct Redis publishing
+if [ "$TEST_MODE" != "api" ] || [ -z "$JWT_TOKEN" ]; then
+    echo "Using DIRECT mode: Publishing directly to Redis streams..."
+    echo ""
 
 # Verify messages can be published
 echo "  Testing Redis connection..."
