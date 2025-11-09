@@ -142,7 +142,8 @@ services:
           memory: 512M
 
   app:
-    image: ${BACKEND_DOCKER_REGISTRY:-${DOCKER_REGISTRY:-rajay04}}/kaleidoscope:backend-${APP_VERSION:-latest}
+    # Backend image from ajayprabhu2004/rajay04 registry
+    image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
     container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
     restart: unless-stopped
     depends_on:

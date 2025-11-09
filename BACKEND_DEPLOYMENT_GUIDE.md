@@ -32,18 +32,19 @@
 Ensure your `.env` file in `~/Kaleidoscope/` contains:
 
 ```bash
+# Docker Registry Configuration
+# DOCKER_REGISTRY: For backend service (ajayprabhu2004/rajay04)
+DOCKER_REGISTRY=ajayprabhu2004
+# OR: DOCKER_REGISTRY=rajay04
+
+# DOCKER_USERNAME: For AI services (shishir01) - currently AI services are built locally
+DOCKER_USERNAME=shishir01
+
 # Redis Configuration (REQUIRED)
 REDIS_PASSWORD=your-redis-password
 
 # Elasticsearch Configuration (REQUIRED)
 ELASTICSEARCH_PASSWORD=your-elasticsearch-password
-
-# Docker Registry Configuration
-# DOCKER_REGISTRY is the default registry (used as fallback)
-DOCKER_REGISTRY=rajay04
-# BACKEND_DOCKER_REGISTRY is specific to backend service (optional, falls back to DOCKER_REGISTRY)
-# If your backend image is in a different registry, uncomment and set:
-# BACKEND_DOCKER_REGISTRY=shishir01
 
 # Backend Application (optional - defaults provided)
 APP_VERSION=latest
@@ -105,7 +106,11 @@ cd kaleidoscope-ai
 ### Step 6: Pull Backend Docker Image
 
 ```bash
-docker pull rajay04/kaleidoscope:backend-latest
+# Pull backend image from ajayprabhu2004/rajay04 registry
+# Replace 'ajayprabhu2004' with your DOCKER_REGISTRY value
+docker pull ajayprabhu2004/kaleidoscope:backend-latest
+# OR if using rajay04:
+# docker pull rajay04/kaleidoscope:backend-latest
 ```
 
 ### Step 7: Start Backend Service
@@ -172,8 +177,10 @@ curl -u elastic:$ELASTICSEARCH_PASSWORD http://localhost:9200/_cluster/health
 # Login to Docker Hub if needed
 docker login
 
-# Verify image name/tag
-docker pull rajay04/kaleidoscope:backend-latest
+# Verify image name/tag (replace with your DOCKER_REGISTRY)
+docker pull ajayprabhu2004/kaleidoscope:backend-latest
+# OR if using rajay04:
+# docker pull rajay04/kaleidoscope:backend-latest
 ```
 
 ### Network Issues
@@ -207,7 +214,10 @@ APP_PORT=8081
 
 ```bash
 cd ~/Kaleidoscope/kaleidoscope-ai
-docker pull rajay04/kaleidoscope:backend-latest
+# Pull backend image (replace with your DOCKER_REGISTRY)
+docker pull ajayprabhu2004/kaleidoscope:backend-latest
+# OR if using rajay04:
+# docker pull rajay04/kaleidoscope:backend-latest
 docker-compose -f docker-compose.prod.yml up -d app
 ```
 

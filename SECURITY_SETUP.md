@@ -32,8 +32,13 @@
 Create a `.env` file in the `kaleidoscope-ai` directory with the following variables:
 
 ```bash
-# Docker Hub Configuration
-DOCKER_USERNAME=your-dockerhub-username
+# Docker Registry Configuration
+# DOCKER_REGISTRY: For backend service (ajayprabhu2004/rajay04)
+DOCKER_REGISTRY=ajayprabhu2004
+# OR: DOCKER_REGISTRY=rajay04
+
+# DOCKER_USERNAME: For AI services (shishir01) - currently AI services are built locally
+DOCKER_USERNAME=shishir01
 
 # Redis Configuration (REQUIRED)
 REDIS_PASSWORD=your-strong-redis-password-here
@@ -60,12 +65,6 @@ DB_PORT=5432
 DB_NAME=kaleidoscope
 DB_USER=kaleidoscope_user
 DB_PASSWORD=your-database-password-here
-
-# Docker Registry Configuration
-# DOCKER_REGISTRY is the default registry (used as fallback)
-DOCKER_REGISTRY=rajay04
-# BACKEND_DOCKER_REGISTRY is specific to backend service (optional, falls back to DOCKER_REGISTRY)
-# BACKEND_DOCKER_REGISTRY=shishir01
 
 # Backend Application Configuration (optional - defaults provided)
 APP_VERSION=latest
