@@ -1,0 +1,38 @@
+# 🔌 API Documentation
+
+**API testing resources and collections**
+
+---
+
+## 📚 Resources
+
+- **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
+
+---
+
+## 🚀 Usage
+
+### Import into Postman
+
+1. Open Postman
+2. Click "Import"
+3. Select `Kaleidoscope_AI_API_Tests.postman_collection.json`
+4. Start testing!
+
+---
+
+## 📋 Collection Contents
+
+The Postman collection includes:
+
+- API endpoint tests
+- Request examples
+- Response validation
+- Environment variables
+
+---
+
+## 🔗 Related Documentation
+
+- **Testing**: [../testing/](../testing/)
+- **Backend Integration**: [../backend-integration/](../backend-integration/)

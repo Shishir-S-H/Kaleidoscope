@@ -16,22 +16,28 @@
 ### Architecture & Design
 
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Project structure overview
-- **[PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md](PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md)** - High-level overview
+- **[stakeholders/PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md](stakeholders/PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md)** - High-level overview
 - **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)** - Complete system documentation
 - **[architecture/](architecture/)** - Architecture diagrams and details
 
 ### Backend Integration
 
 - **[backend-integration/](backend-integration/)** - Complete backend integration guide
-  - **BACKEND_INTEGRATION_COMPLETE_GUIDE.md** - Full integration walkthrough
+  - **README.md** - Start here: Documentation guide
+  - **BACKEND_INTEGRATION_COMPLETE_GUIDE.md** - Full integration walkthrough (comprehensive)
+  - **INTEGRATION_WALKTHROUGH.md** - Step-by-step integration tutorial
+  - **INTEGRATION_SUMMARY.md** - High-level architecture summary
+  - **BACKEND_TEAM_REQUIREMENTS.md** - Backend team requirements and specifications
   - **MESSAGE_FORMATS.md** - Message format specifications
   - **POST_AGGREGATION_EXPLAINED.md** - Post aggregation logic
   - **READ_MODELS.md** - PostgreSQL read models
   - **DATABASE_SCHEMA.md** - Database schema details
+  - **CODE_EXAMPLES.md** - Code examples for integration
 
 ### Deployment
 
 - **[deployment/](deployment/)** - Deployment guides
+  - **README.md** - Start here: Deployment documentation guide
   - **BACKEND_DEPLOYMENT_GUIDE.md** - Backend deployment on DigitalOcean
   - **DIGITALOCEAN_DEPLOYMENT_GUIDE.md** - DigitalOcean setup guide
   - **BACKEND_INTEGRATION_GUIDE.md** - Backend-AI integration
@@ -40,6 +46,7 @@
 ### Testing
 
 - **[testing/](testing/)** - Testing documentation and tools
+  - **README.md** - Start here: Testing documentation guide
   - **README_TESTING_AND_DOCS.md** - Testing overview
   - **TESTING_DOCUMENTATION_SUMMARY.md** - Testing summary
   - **TESTING_TOOLS_SUMMARY.md** - Testing tools reference
@@ -47,28 +54,25 @@
 
 ### Elasticsearch
 
-- **[ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Elasticsearch setup and configuration
+- **[elasticsearch/ELASTICSEARCH_COMPLETE_SUMMARY.md](elasticsearch/ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Elasticsearch setup and configuration
 - **[elasticsearch/](elasticsearch/)** - Elasticsearch-specific documentation
 
 ### Implementation Details
 
-- **[CORRELATION_ID_IMPLEMENTATION.md](CORRELATION_ID_IMPLEMENTATION.md)** - Correlation ID implementation
-- **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)** - Backend team requirements
+- **[implementation/CORRELATION_ID_IMPLEMENTATION.md](implementation/CORRELATION_ID_IMPLEMENTATION.md)** - Correlation ID implementation
 
----
+### Configuration & Setup
 
-## 🔧 Configuration & Setup
-
-- **[ENV_FILE_EXAMPLE.md](ENV_FILE_EXAMPLE.md)** - Environment variables example
-- **[SECURITY_SETUP.md](SECURITY_SETUP.md)** - Security configuration guide
+- **[configuration/ENV_FILE_EXAMPLE.md](configuration/ENV_FILE_EXAMPLE.md)** - Environment variables example
+- **[configuration/SECURITY_SETUP.md](configuration/SECURITY_SETUP.md)** - Security configuration guide
 
 ---
 
 ## 📝 Additional Resources
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines
-- **[GITHUB_READY_SUMMARY.md](GITHUB_READY_SUMMARY.md)** - GitHub repository summary
-- **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
+- **[CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md)** - Repository cleanup summary
+- **[api/Kaleidoscope_AI_API_Tests.postman_collection.json](api/Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
 
 ---
 
@@ -81,8 +85,9 @@
 
 ### Deployment Scripts
 
-- **[scripts/deploy.sh](../deploy.sh)** - Deployment script
-- **[scripts/deploy_digitalocean.sh](../deploy_digitalocean.sh)** - DigitalOcean deployment
+- **[scripts/deployment/deploy.sh](../scripts/deployment/deploy.sh)** - Deployment script
+- **[scripts/deployment/deploy_digitalocean.sh](../scripts/deployment/deploy_digitalocean.sh)** - DigitalOcean deployment
+- **[scripts/deployment/start-backend.sh](../scripts/deployment/start-backend.sh)** - Backend startup script
 - **[scripts/monitor_services.sh](../scripts/monitor_services.sh)** - Service monitoring
 
 ---

@@ -66,6 +66,7 @@ docker compose ps
 python tests/test_end_to_end.py
 
 # Operational test scripts (runs on servers)
+chmod +x scripts/test/*.sh
 ./scripts/test/comprehensive-test.sh
 ./scripts/test/diagnose-services.sh
 ```
@@ -91,23 +92,36 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 
 📚 **[Complete Documentation Index](docs/INDEX.md)** - All documentation organized by category
 
+**Quick Navigation**:
+
+- 🏗️ **[Architecture](docs/architecture/README.md)** - System architecture
+- 🔗 **[Backend Integration](docs/backend-integration/README.md)** - Integration guides
+- 🚀 **[Deployment](docs/deployment/README.md)** - Deployment guides
+- 🧪 **[Testing](docs/testing/README.md)** - Testing documentation
+- ⚙️ **[Configuration](docs/configuration/README.md)** - Configuration guides
+- 🔍 **[Elasticsearch](docs/elasticsearch/README.md)** - Elasticsearch setup
+- 💻 **[Implementation](docs/implementation/README.md)** - Implementation details
+- 👥 **[Stakeholders](docs/stakeholders/README.md)** - Stakeholder overview
+- 🔌 **[API](docs/api/README.md)** - API resources
+
 ### Essential Reading
 
-| Document                                                                                 | Purpose                             | When to Use                                 |
-| ---------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------- |
-| **[docs/END_TO_END_PROJECT_DOCUMENTATION.md](docs/END_TO_END_PROJECT_DOCUMENTATION.md)** | Complete system documentation       | First time, architecture review, onboarding |
-| **[docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md](docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md)** | Deploy to DigitalOcean              | Cloud deployment                            |
-| **[docs/deployment/BACKEND_INTEGRATION_GUIDE.md](docs/deployment/BACKEND_INTEGRATION_GUIDE.md)** | Integration with backend            | Backend teams                               |
-| **[docs/testing/TESTING_DOCUMENTATION_SUMMARY.md](docs/testing/TESTING_DOCUMENTATION_SUMMARY.md)** | Testing doc map                     | Finding specific information                |
-| **[docs/ELASTICSEARCH_COMPLETE_SUMMARY.md](docs/ELASTICSEARCH_COMPLETE_SUMMARY.md)**     | Elasticsearch setup & configuration | ES setup, index management                  |
+| Document                                                                                                         | Purpose                             | When to Use                                 |
+| ---------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------- |
+| **[docs/END_TO_END_PROJECT_DOCUMENTATION.md](docs/END_TO_END_PROJECT_DOCUMENTATION.md)**                         | Complete system documentation       | First time, architecture review, onboarding |
+| **[docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md](docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md)**         | Deploy to DigitalOcean              | Cloud deployment                            |
+| **[docs/deployment/BACKEND_INTEGRATION_GUIDE.md](docs/deployment/BACKEND_INTEGRATION_GUIDE.md)**                 | Integration with backend            | Backend teams                               |
+| **[docs/testing/TESTING_DOCUMENTATION_SUMMARY.md](docs/testing/TESTING_DOCUMENTATION_SUMMARY.md)**               | Testing doc map                     | Finding specific information                |
+| **[docs/elasticsearch/ELASTICSEARCH_COMPLETE_SUMMARY.md](docs/elasticsearch/ELASTICSEARCH_COMPLETE_SUMMARY.md)** | Elasticsearch setup & configuration | ES setup, index management                  |
 
 ### Backend Integration
 
-| Document                                                                                     | Purpose                 | Audience     |
-| -------------------------------------------------------------------------------------------- | ----------------------- | ------------ |
-| **[docs/backend-integration/DATABASE_SCHEMA.md](docs/backend-integration/DATABASE_SCHEMA.md)** | Full database schema    | Backend team |
-| **[docs/backend-integration/READ_MODELS.md](docs/backend-integration/READ_MODELS.md)** | Read model tables       | Backend team |
-| **[docs/BACKEND_TEAM_REQUIREMENTS.md](docs/BACKEND_TEAM_REQUIREMENTS.md)**                   | Redis integration specs | Backend team |
+| Document                                                                                                                             | Purpose                    | Audience     |
+| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------ |
+| **[docs/backend-integration/BACKEND_INTEGRATION_COMPLETE_GUIDE.md](docs/backend-integration/BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** | Complete integration guide | Backend team |
+| **[docs/backend-integration/DATABASE_SCHEMA.md](docs/backend-integration/DATABASE_SCHEMA.md)**                                       | Full database schema       | Backend team |
+| **[docs/backend-integration/READ_MODELS.md](docs/backend-integration/READ_MODELS.md)**                                               | Read model tables          | Backend team |
+| **[docs/backend-integration/BACKEND_TEAM_REQUIREMENTS.md](docs/backend-integration/BACKEND_TEAM_REQUIREMENTS.md)**                   | Redis integration specs    | Backend team |
 
 ---
 
@@ -324,12 +338,17 @@ kaleidoscope-ai/
 ├── 📁 tests/                      # Test suites (4 test files)
 ├── 📁 scripts/                    # Utility scripts
 │   ├── test/                      # Test scripts
-│   └── setup_es_indices.py       # ES setup script
+│   ├── deployment/                # Deployment scripts
+│   ├── monitor_services.sh         # Service monitoring
+│   └── setup_es_indices.py        # ES setup script
 ├── 📁 migrations/                 # Database migrations
 └── 📄 docker-compose.yml          # Service orchestration
 ```
 
-**For detailed structure**: See [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)
+**For detailed structure**:
+
+- [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) - Project structure details
+- [`REPOSITORY_STRUCTURE.md`](REPOSITORY_STRUCTURE.md) - Complete repository structure
 
 ### Key Technologies
 

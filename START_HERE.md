@@ -51,6 +51,8 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 
 👉 **Read**: [`docs/END_TO_END_PROJECT_DOCUMENTATION.md`](docs/END_TO_END_PROJECT_DOCUMENTATION.md)
 
+👉 **Browse**: [`REPOSITORY_STRUCTURE.md`](REPOSITORY_STRUCTURE.md) - Complete repository structure
+
 - Complete system architecture
 - All components explained
 - Data flow diagrams
