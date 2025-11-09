@@ -272,15 +272,16 @@ if [ "$TEST_MODE" = "api" ]; then
     echo "----------------------------------------"
     echo "  Logging in as: $TEST_USER_EMAIL"
     
-    LOGIN_RESPONSE=$(curl -s -X POST "${BACKEND_AUTH_BASE}/login" \
+    # Login and capture both headers and body
+    LOGIN_RESPONSE=$(curl -s -i -X POST "${BACKEND_AUTH_BASE}/login" \
         -H "Content-Type: application/json" \
         -d "{\"email\":\"${TEST_USER_EMAIL}\",\"password\":\"${TEST_USER_PASSWORD}\"}" \
         2>&1)
     
-    # Extract JWT token from Authorization header or response body
-    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "authorization:" | sed 's/.*Bearer //' | tr -d '\r' || echo "")
+    # Extract JWT token from Authorization header (backend returns it in header)
+    JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "^authorization:" | sed 's/.*Bearer //' | tr -d '\r' | tr -d ' ' || echo "")
     if [ -z "$JWT_TOKEN" ]; then
-        # Try to extract from response body
+        # Try to extract from response body as fallback
         JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4 || echo "")
     fi
     
