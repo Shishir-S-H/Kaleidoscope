@@ -243,6 +243,23 @@ echo "ES Sync service logs (recent):"
 docker-compose -f docker-compose.prod.yml logs --tail=20 es_sync | grep -E "Connected to PostgreSQL|PostgreSQL connection|Received sync message|Sync completed|ERROR|error" || echo "No recent logs"
 
 echo ""
+echo -e "${BLUE}Step 17: Check Dead Letter Queue${NC}"
+echo "Checking for messages in DLQ (ai-processing-dlq):"
+DLQ_COUNT=$(docker exec redis redis-cli -a ${REDIS_PASSWORD} XLEN ai-processing-dlq 2>/dev/null || echo "0")
+if [ "$DLQ_COUNT" -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  Found $DLQ_COUNT messages in DLQ${NC}"
+    echo "Recent DLQ messages:"
+    docker exec redis redis-cli -a ${REDIS_PASSWORD} XREVRANGE ai-processing-dlq + - COUNT 5 2>/dev/null | head -20 || echo "No messages"
+else
+    echo -e "${GREEN}✅ No messages in DLQ${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}Step 18: Check Retry Logs${NC}"
+echo "Checking for retry attempts in AI service logs:"
+docker-compose -f docker-compose.prod.yml logs --tail=50 | grep -E "retry|Retrying|attempt|Processing failed" | tail -10 || echo "No retry logs found"
+
+echo ""
 echo -e "${GREEN}✅ Comprehensive Test Complete${NC}"
 echo ""
 echo "Connection details for backend team:"

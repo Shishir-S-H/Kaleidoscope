@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
@@ -18,6 +19,7 @@ load_dotenv()
 from shared.utils.logger import get_logger
 from shared.redis_streams import RedisStreamPublisher, RedisStreamConsumer
 from shared.redis_streams.utils import decode_message
+from shared.utils.retry import retry_with_backoff, publish_to_dlq
 
 # Initialize logger
 LOGGER = get_logger("image-tagger")
@@ -42,9 +44,23 @@ DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.05"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_INPUT = "post-image-processing"
 STREAM_OUTPUT = "ml-insights-results"
+STREAM_DLQ = "ai-processing-dlq"  # Dead Letter Queue
 CONSUMER_GROUP = "image-tagger-group"
 CONSUMER_NAME = "image-tagger-worker-1"
 
+# Retry configuration
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 1.0  # seconds
+MAX_RETRY_DELAY = 30.0  # seconds
+BACKOFF_MULTIPLIER = 2.0
+
+@retry_with_backoff(
+    max_retries=MAX_RETRIES,
+    initial_delay=INITIAL_RETRY_DELAY,
+    max_delay=MAX_RETRY_DELAY,
+    backoff_multiplier=BACKOFF_MULTIPLIER,
+    retryable_exceptions=(requests.RequestException, requests.Timeout, ConnectionError)
+)
 def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
     """
     Call the Hugging Face API to get image tags and scores.
@@ -131,15 +147,18 @@ def process_image_tagging(image_bytes: bytes, top_n: int = None, threshold: floa
 
 def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher):
     """
-    Callback function for processing messages from Redis Stream.
+    Callback function for processing messages from Redis Stream with retry logic and DLQ.
     """
+    decoded_data = None
+    retry_count = 0
+    
     try:
         # Decode message data
         decoded_data = decode_message(data)
         media_id = int(decoded_data.get("mediaId", 0))
         post_id = int(decoded_data.get("postId", 0))
         media_url = decoded_data.get("mediaUrl", "")
-        correlation_id = decoded_data.get("correlationId", "")  # Extract correlationId for log tracing
+        correlation_id = decoded_data.get("correlationId", "")
         
         LOGGER.info("Received tagging job", extra={
             "message_id": message_id,
@@ -153,45 +172,113 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             LOGGER.error("Invalid message format", extra={"data": decoded_data})
             return
         
-        # Download image from URL
-        LOGGER.info("Downloading image", extra={"media_id": media_id, "media_url": media_url, "correlation_id": correlation_id})
-        response = requests.get(media_url, timeout=30)
-        response.raise_for_status()
-        image_bytes = response.content
-        LOGGER.info("Image downloaded successfully", extra={"media_id": media_id, "correlation_id": correlation_id})
+        # Retry logic for processing
+        last_exception = None
+        delay = INITIAL_RETRY_DELAY
         
-        # Run tagging via Hugging Face API
-        LOGGER.info("Running tagging", extra={"media_id": media_id, "correlation_id": correlation_id})
-        tagging_result = process_image_tagging(image_bytes)
-        LOGGER.info("Tagging complete", extra={
-            "media_id": media_id,
-            "num_tags": len(tagging_result['tags']),
-            "tags": tagging_result['tags'],
-            "correlation_id": correlation_id
-        })
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                retry_count = attempt
+                
+                # Download image from URL (with retry)
+                LOGGER.info("Downloading image", extra={
+                    "media_id": media_id,
+                    "media_url": media_url,
+                    "correlation_id": correlation_id,
+                    "attempt": attempt + 1
+                })
+                
+                try:
+                    response = requests.get(media_url, timeout=30)
+                    response.raise_for_status()
+                    image_bytes = response.content
+                    LOGGER.info("Image downloaded successfully", extra={"media_id": media_id, "correlation_id": correlation_id})
+                except (requests.RequestException, requests.Timeout, ConnectionError) as e:
+                    if attempt < MAX_RETRIES:
+                        LOGGER.warning(f"Image download failed (attempt {attempt + 1}/{MAX_RETRIES + 1}): {str(e)}. Retrying in {delay:.2f} seconds...", extra={
+                            "media_id": media_id,
+                            "attempt": attempt + 1,
+                            "delay": delay,
+                            "correlation_id": correlation_id
+                        })
+                        time.sleep(delay)
+                        delay = min(delay * BACKOFF_MULTIPLIER, MAX_RETRY_DELAY)
+                        continue
+                    else:
+                        raise
+                
+                # Run tagging via Hugging Face API (with retry)
+                LOGGER.info("Running tagging", extra={"media_id": media_id, "correlation_id": correlation_id})
+                tagging_result = process_image_tagging(image_bytes)
+                LOGGER.info("Tagging complete", extra={
+                    "media_id": media_id,
+                    "num_tags": len(tagging_result['tags']),
+                    "tags": tagging_result['tags'],
+                    "correlation_id": correlation_id
+                })
+                
+                # Publish result to ml-insights-results stream
+                result_message = {
+                    "mediaId": str(media_id),
+                    "postId": str(post_id),
+                    "service": "tagging",
+                    "tags": json.dumps(tagging_result['tags']),
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                }
+                
+                publisher.publish(STREAM_OUTPUT, result_message)
+                LOGGER.info("Published result", extra={
+                    "media_id": media_id,
+                    "stream": STREAM_OUTPUT,
+                    "correlation_id": correlation_id
+                })
+                
+                # Success - exit retry loop
+                return
+                
+            except (requests.RequestException, requests.Timeout, ConnectionError, ValueError) as e:
+                last_exception = e
+                if attempt < MAX_RETRIES:
+                    LOGGER.warning(f"Processing failed (attempt {attempt + 1}/{MAX_RETRIES + 1}): {str(e)}. Retrying in {delay:.2f} seconds...", extra={
+                        "media_id": media_id,
+                        "attempt": attempt + 1,
+                        "delay": delay,
+                        "correlation_id": correlation_id,
+                        "error": str(e)
+                    })
+                    time.sleep(delay)
+                    delay = min(delay * BACKOFF_MULTIPLIER, MAX_RETRY_DELAY)
+                else:
+                    raise
         
-        # Publish result to ml-insights-results stream
-        result_message = {
-            "mediaId": str(media_id),
-            "postId": str(post_id),
-            "service": "tagging",
-            "tags": json.dumps(tagging_result['tags']),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-        
-        publisher.publish(STREAM_OUTPUT, result_message)
-        LOGGER.info("Published result", extra={
-            "media_id": media_id,
-            "stream": STREAM_OUTPUT,
-            "correlation_id": correlation_id
-        })
-        
+        # If we get here, all retries failed
+        if last_exception:
+            raise last_exception
+            
     except Exception as e:
-        LOGGER.exception("Error processing message", extra={
+        LOGGER.exception("Error processing message after all retries", extra={
             "error": str(e),
             "message_id": message_id,
-            "correlation_id": decoded_data.get("correlationId", "") if 'decoded_data' in locals() else ""
+            "retry_count": retry_count,
+            "correlation_id": decoded_data.get("correlationId", "") if decoded_data else ""
         })
+        
+        # Publish to dead letter queue
+        try:
+            publish_to_dlq(
+                publisher=publisher,
+                dlq_stream=STREAM_DLQ,
+                original_message_id=message_id,
+                original_data=data,
+                error=e,
+                service_name="image-tagger",
+                retry_count=retry_count
+            )
+        except Exception as dlq_error:
+            LOGGER.exception("Failed to publish to dead letter queue", extra={
+                "dlq_error": str(dlq_error),
+                "message_id": message_id
+            })
 
 
 def main():

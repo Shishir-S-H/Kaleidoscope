@@ -122,5 +122,17 @@ echo "ES Sync logs (recent):"
 docker-compose -f docker-compose.prod.yml logs --tail=10 es_sync | grep -E "Connected to PostgreSQL|PostgreSQL connection|Received sync message|Sync completed|ERROR|error" || echo "No recent logs"
 
 echo ""
+echo -e "${BLUE}Step 11: Check Dead Letter Queue${NC}"
+echo "Checking for messages in DLQ (ai-processing-dlq):"
+DLQ_COUNT=$(docker exec redis redis-cli -a ${REDIS_PASSWORD} XLEN ai-processing-dlq 2>/dev/null || echo "0")
+if [ "$DLQ_COUNT" -gt 0 ]; then
+    echo -e "${YELLOW}⚠️  Found $DLQ_COUNT messages in DLQ${NC}"
+    echo "Recent DLQ messages:"
+    docker exec redis redis-cli -a ${REDIS_PASSWORD} XREVRANGE ai-processing-dlq + - COUNT 3 2>/dev/null | head -15 || echo "No messages"
+else
+    echo -e "${GREEN}✅ No messages in DLQ${NC}"
+fi
+
+echo ""
 echo -e "${GREEN}✅ Diagnostic Complete${NC}"
 
