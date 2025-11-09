@@ -23,6 +23,10 @@ docker compose up -d
 ```bash
 # Run complete test suite
 python tests/test_end_to_end.py
+
+# Or use operational test scripts
+./scripts/test/comprehensive-test.sh
+./scripts/test/diagnose-services.sh
 ```
 
 **Expected**: All tests should pass ✅
@@ -42,6 +46,8 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 ## 📚 Need More Details?
 
 ### For Complete Understanding
+
+👉 **Read**: [`docs/INDEX.md`](docs/INDEX.md) - Complete documentation index
 
 👉 **Read**: [`docs/END_TO_END_PROJECT_DOCUMENTATION.md`](docs/END_TO_END_PROJECT_DOCUMENTATION.md)
 

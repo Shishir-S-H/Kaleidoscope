@@ -1,121 +1,120 @@
-﻿# Kaleidoscope AI - Documentation Index
+﻿# 📚 Kaleidoscope AI - Documentation Index
 
-This directory contains comprehensive documentation for the Kaleidoscope AI microservices platform. The documentation is organized to help developers, backend teams, and stakeholders understand and integrate with the system.
-
-## 📚 **Core Documentation**
-
-### **Project Overview & Architecture**
-
-- **[PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md](PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md)** - 🎯 **EXECUTIVE SUMMARY** - High-level project overview for stakeholders and management
-- **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)** - Complete project bible covering architecture, data flows, and all components
-- **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Clean and organized project directory structure
-- **[ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Comprehensive Elasticsearch setup and integration guide
-
-### **Backend Integration**
-
-- **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** - 🚀 **START HERE** - Complete integration guide with code examples, SQL scripts, and step-by-step implementation
-- **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)** - Detailed technical requirements and message formats
-- **[SIMPLIFIED_READ_MODELS_FOR_BACKEND.md](SIMPLIFIED_READ_MODELS_FOR_BACKEND.md)** - Database schema and read model tables for backend implementation
-- **[COMPLETE_DATABASE_SCHEMA.md](COMPLETE_DATABASE_SCHEMA.md)** - Full database schema with all 13 tables (core, AI, and read models)
-- **[INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md)** - High-level integration overview and team responsibilities
-- **[POST_AGGREGATION_EXPLAINED.md](POST_AGGREGATION_EXPLAINED.md)** - Technical explanation of post aggregation strategy
-
-## 🧪 **Testing & Quality Assurance**
-
-### **Testing Documentation**
-
-- **[MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)** - Step-by-step manual testing instructions
-- **[TESTING_DOCUMENTATION_SUMMARY.md](TESTING_DOCUMENTATION_SUMMARY.md)** - Overview and navigation guide for all testing documentation
-- **[README_TESTING_AND_DOCS.md](README_TESTING_AND_DOCS.md)** - Quick reference for testing and documentation
-- **[TESTING_TOOLS_SUMMARY.md](TESTING_TOOLS_SUMMARY.md)** - Summary of testing tools and scripts
-
-### **API Testing**
-
-- **[CURL_COMMANDS_REFERENCE.md](CURL_COMMANDS_REFERENCE.md)** - Complete reference for all API endpoints and curl commands
-- **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
-
-## 🚀 **Quick Start Guides**
-
-### **For Stakeholders & Management**
-
-1. **START HERE**: Read **[PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md](PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md)** for executive summary
-2. Review **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)** for technical details
-3. Check **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** for implementation status
-
-### **For New Developers**
-
-1. Start with **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)** for complete understanding
-2. Review **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** for codebase navigation
-3. Follow **[MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)** for hands-on testing
-
-### **For Backend Team**
-
-1. **START HERE**: Read **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** for complete integration guide
-2. Study **[COMPLETE_DATABASE_SCHEMA.md](COMPLETE_DATABASE_SCHEMA.md)** for database design
-3. Review **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)** for detailed technical requirements
-
-### **For Testing & QA**
-
-1. Use **[TESTING_DOCUMENTATION_SUMMARY.md](TESTING_DOCUMENTATION_SUMMARY.md)** as your starting point
-2. Follow **[MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)** for comprehensive testing
-3. Reference **[CURL_COMMANDS_REFERENCE.md](CURL_COMMANDS_REFERENCE.md)** for API testing
-
-## 📋 **Documentation Categories**
-
-### **Architecture & Design**
-
-- System architecture and data flow
-- Microservices design patterns
-- Database schema and relationships
-- Elasticsearch indices and mappings
-
-### **Integration & APIs**
-
-- Redis Streams message formats
-- REST API endpoints
-- Database integration points
-- Authentication and security
-
-### **Testing & Quality**
-
-- Unit and integration testing
-- End-to-end testing procedures
-- Performance benchmarking
-- API testing with Postman
-
-### **Operations & Deployment**
-
-- Docker containerization
-- Service orchestration
-- Monitoring and logging
-- Production deployment considerations
-
-## 🔗 **Related Files**
-
-### **Configuration Files**
-
-- `../docker-compose.yml` - Service orchestration
-- `../es_mappings/` - Elasticsearch index mappings
-- `../shared/env_templates/` - Environment variable templates
-
-### **Scripts & Tools**
-
-- `../scripts/setup_es_indices.py` - Elasticsearch setup script
-- `../tests/` - Automated test suites
-- `../run_comprehensive_tests.bat` - Windows test runner
-- `../run_comprehensive_tests.sh` - Linux/Mac test runner
-
-## 📞 **Support & Contact**
-
-For questions about:
-
-- **Architecture & Design**: Review END_TO_END_PROJECT_DOCUMENTATION.md
-- **Backend Integration**: Check BACKEND_TEAM_REQUIREMENTS.md
-- **Testing Issues**: Consult MANUAL_TESTING_GUIDE.md
-- **API Usage**: Reference CURL_COMMANDS_REFERENCE.md
+**Last Updated**: November 9, 2025
 
 ---
 
-**Last Updated**: January 2025  
-**Version**: 2.0  
-**Status**: Production Ready
+## 🚀 Quick Start
+
+- **[START_HERE.md](../START_HERE.md)** - Quick start guide for new users
+- **[README.md](../README.md)** - Main project documentation
+
+---
+
+## 📖 Core Documentation
+
+### Architecture & Design
+
+- **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Project structure overview
+- **[PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md](PROJECT_OVERVIEW_FOR_STAKEHOLDERS.md)** - High-level overview
+- **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)** - Complete system documentation
+- **[architecture/](architecture/)** - Architecture diagrams and details
+
+### Backend Integration
+
+- **[backend-integration/](backend-integration/)** - Complete backend integration guide
+  - **BACKEND_INTEGRATION_COMPLETE_GUIDE.md** - Full integration walkthrough
+  - **MESSAGE_FORMATS.md** - Message format specifications
+  - **POST_AGGREGATION_EXPLAINED.md** - Post aggregation logic
+  - **READ_MODELS.md** - PostgreSQL read models
+  - **DATABASE_SCHEMA.md** - Database schema details
+
+### Deployment
+
+- **[deployment/](deployment/)** - Deployment guides
+  - **BACKEND_DEPLOYMENT_GUIDE.md** - Backend deployment on DigitalOcean
+  - **DIGITALOCEAN_DEPLOYMENT_GUIDE.md** - DigitalOcean setup guide
+  - **BACKEND_INTEGRATION_GUIDE.md** - Backend-AI integration
+  - **BACKEND_ENV_VARIABLES.md** - Environment variables reference
+
+### Testing
+
+- **[testing/](testing/)** - Testing documentation and tools
+  - **README_TESTING_AND_DOCS.md** - Testing overview
+  - **TESTING_DOCUMENTATION_SUMMARY.md** - Testing summary
+  - **TESTING_TOOLS_SUMMARY.md** - Testing tools reference
+  - **CURL_COMMANDS_REFERENCE.md** - cURL command reference
+
+### Elasticsearch
+
+- **[ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Elasticsearch setup and configuration
+- **[elasticsearch/](elasticsearch/)** - Elasticsearch-specific documentation
+
+### Implementation Details
+
+- **[CORRELATION_ID_IMPLEMENTATION.md](CORRELATION_ID_IMPLEMENTATION.md)** - Correlation ID implementation
+- **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)** - Backend team requirements
+
+---
+
+## 🔧 Configuration & Setup
+
+- **[ENV_FILE_EXAMPLE.md](ENV_FILE_EXAMPLE.md)** - Environment variables example
+- **[SECURITY_SETUP.md](SECURITY_SETUP.md)** - Security configuration guide
+
+---
+
+## 📝 Additional Resources
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines
+- **[GITHUB_READY_SUMMARY.md](GITHUB_READY_SUMMARY.md)** - GitHub repository summary
+- **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
+
+---
+
+## 🗂️ Scripts & Tools
+
+### Test Scripts
+
+- **[scripts/test/comprehensive-test.sh](../scripts/test/comprehensive-test.sh)** - Comprehensive test suite
+- **[scripts/test/diagnose-services.sh](../scripts/test/diagnose-services.sh)** - Service diagnostics
+
+### Deployment Scripts
+
+- **[scripts/deploy.sh](../deploy.sh)** - Deployment script
+- **[scripts/deploy_digitalocean.sh](../deploy_digitalocean.sh)** - DigitalOcean deployment
+- **[scripts/monitor_services.sh](../scripts/monitor_services.sh)** - Service monitoring
+
+---
+
+## 📊 Project Status
+
+**Current Status**: Production-Ready Core  
+**Last Major Update**: November 9, 2025
+
+### Completed Features
+
+- ✅ 5 AI Services (Content Moderation, Image Tagging, Scene Recognition, Captioning, Face Recognition)
+- ✅ Post Aggregator
+- ✅ ES Sync Service
+- ✅ Retry Logic & Dead Letter Queue
+- ✅ Metrics & Health Checks
+- ✅ PostgreSQL Read Model Integration
+- ✅ Correlation ID Support
+- ✅ Structured Logging
+
+### Testing
+
+- ✅ Comprehensive test suite
+- ✅ Service diagnostics
+- ✅ End-to-end testing framework
+
+---
+
+## 🔗 Quick Links
+
+- **Main README**: [../README.md](../README.md)
+- **Quick Start**: [../START_HERE.md](../START_HERE.md)
+- **Backend Integration**: [backend-integration/BACKEND_INTEGRATION_COMPLETE_GUIDE.md](backend-integration/BACKEND_INTEGRATION_COMPLETE_GUIDE.md)
+- **Deployment**: [deployment/BACKEND_DEPLOYMENT_GUIDE.md](deployment/BACKEND_DEPLOYMENT_GUIDE.md)
+- **Testing**: [testing/README_TESTING_AND_DOCS.md](testing/README_TESTING_AND_DOCS.md)

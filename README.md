@@ -7,7 +7,7 @@
 [![Redis](https://img.shields.io/badge/Redis-Streams-DC382D?style=flat&logo=redis)](https://redis.io/)
 
 **Status**: Production-Ready Core  
-**Last Updated**: October 28, 2025
+**Last Updated**: November 9, 2025
 
 ---
 
@@ -65,8 +65,9 @@ docker compose ps
 # Automated smoke test
 python tests/test_end_to_end.py
 
-# Operational test script (runs on servers)
-./comprehensive-test.sh
+# Operational test scripts (runs on servers)
+./scripts/test/comprehensive-test.sh
+./scripts/test/diagnose-services.sh
 ```
 
 ### 3. Verify System
@@ -86,22 +87,26 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 
 ## 📚 Documentation
 
+### Documentation Index
+
+📚 **[Complete Documentation Index](docs/INDEX.md)** - All documentation organized by category
+
 ### Essential Reading
 
 | Document                                                                                 | Purpose                             | When to Use                                 |
 | ---------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------- |
 | **[docs/END_TO_END_PROJECT_DOCUMENTATION.md](docs/END_TO_END_PROJECT_DOCUMENTATION.md)** | Complete system documentation       | First time, architecture review, onboarding |
-| **[DIGITALOCEAN_DEPLOYMENT_GUIDE.md](DIGITALOCEAN_DEPLOYMENT_GUIDE.md)**                 | Deploy to DigitalOcean              | Cloud deployment                            |
-| **[BACKEND_INTEGRATION_GUIDE.md](BACKEND_INTEGRATION_GUIDE.md)**                         | Integration with backend            | Backend teams                               |
-| **[docs/TESTING_DOCUMENTATION_SUMMARY.md](docs/TESTING_DOCUMENTATION_SUMMARY.md)**       | Testing doc map                     | Finding specific information                |
+| **[docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md](docs/deployment/DIGITALOCEAN_DEPLOYMENT_GUIDE.md)** | Deploy to DigitalOcean              | Cloud deployment                            |
+| **[docs/deployment/BACKEND_INTEGRATION_GUIDE.md](docs/deployment/BACKEND_INTEGRATION_GUIDE.md)** | Integration with backend            | Backend teams                               |
+| **[docs/testing/TESTING_DOCUMENTATION_SUMMARY.md](docs/testing/TESTING_DOCUMENTATION_SUMMARY.md)** | Testing doc map                     | Finding specific information                |
 | **[docs/ELASTICSEARCH_COMPLETE_SUMMARY.md](docs/ELASTICSEARCH_COMPLETE_SUMMARY.md)**     | Elasticsearch setup & configuration | ES setup, index management                  |
 
 ### Backend Integration
 
 | Document                                                                                     | Purpose                 | Audience     |
 | -------------------------------------------------------------------------------------------- | ----------------------- | ------------ |
-| **[docs/COMPLETE_DATABASE_SCHEMA.md](docs/COMPLETE_DATABASE_SCHEMA.md)**                     | Full database schema    | Backend team |
-| **[docs/SIMPLIFIED_READ_MODELS_FOR_BACKEND.md](docs/SIMPLIFIED_READ_MODELS_FOR_BACKEND.md)** | Read model tables       | Backend team |
+| **[docs/backend-integration/DATABASE_SCHEMA.md](docs/backend-integration/DATABASE_SCHEMA.md)** | Full database schema    | Backend team |
+| **[docs/backend-integration/READ_MODELS.md](docs/backend-integration/READ_MODELS.md)** | Read model tables       | Backend team |
 | **[docs/BACKEND_TEAM_REQUIREMENTS.md](docs/BACKEND_TEAM_REQUIREMENTS.md)**                   | Redis integration specs | Backend team |
 
 ---
@@ -229,7 +234,7 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 python tests/test_end_to_end.py
 ```
 
-Note: See `tests/` for unit/integration tests and `comprehensive-test.sh` for an end-to-end operational check on servers.
+Note: See `tests/` for unit/integration tests and `scripts/test/` for operational test scripts.
 
 ### Manual Testing
 
@@ -318,6 +323,8 @@ kaleidoscope-ai/
 ├── 📁 es_mappings/                # Elasticsearch index mappings (7 indices)
 ├── 📁 tests/                      # Test suites (4 test files)
 ├── 📁 scripts/                    # Utility scripts
+│   ├── test/                      # Test scripts
+│   └── setup_es_indices.py       # ES setup script
 ├── 📁 migrations/                 # Database migrations
 └── 📄 docker-compose.yml          # Service orchestration
 ```
@@ -428,7 +435,7 @@ curl http://localhost:9200/_cat/indices?v
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on how to:
+We welcome contributions! Please see our [Contributing Guidelines](docs/CONTRIBUTING.md) for details on how to:
 
 - Report bugs
 - Suggest new features
