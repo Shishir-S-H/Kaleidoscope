@@ -159,10 +159,11 @@ services:
       - SPRING_ELASTICSEARCH_USERNAME=elastic
       - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      # PostgreSQL (Neon DB) - from .env file
-      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
+      # PostgreSQL (Neon DB) - explicitly set to ensure it's loaded
+      # These will be loaded from ../.env file via env_file directive
+      - SPRING_DATASOURCE_URL
+      - DB_USERNAME
+      - DB_PASSWORD
       # Spring Boot configs - from .env file
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-production}
       - CONTEXT_PATH=${CONTEXT_PATH:-/kaleidoscope}
