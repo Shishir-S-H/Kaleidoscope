@@ -177,6 +177,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  app:
+    image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
+    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      # Development overrides - point to internal Docker service names
+      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
+      - SPRING_ELASTICSEARCH_USERNAME=elastic
+      - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-changeme123}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # search_service:
   #   build: ./services/search_service
   #   ports:
