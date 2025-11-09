@@ -186,21 +186,37 @@ echo ""
 
 # Create post with images
 log_info "Creating post with ${#TEST_IMAGE_URLS[@]} images..."
-# Build JSON array manually (no jq dependency)
-MEDIA_URLS_JSON="["
+
+# First, get a category ID (required field)
+log_info "Fetching categories to get a valid category ID..."
+CATEGORIES_RESPONSE=$(curl -s -H "Authorization: Bearer ${JWT_TOKEN}" "${BASE_URL}/api/categories")
+CATEGORY_ID=$(echo "$CATEGORIES_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+
+if [ -z "$CATEGORY_ID" ]; then
+    log_warning "No category found, using default category ID 1"
+    CATEGORY_ID=1
+else
+    log_info "Using category ID: ${CATEGORY_ID}"
+fi
+
+# Build mediaDetails array (required format)
+MEDIA_DETAILS_JSON="["
 for i in "${!TEST_IMAGE_URLS[@]}"; do
     if [ $i -gt 0 ]; then
-        MEDIA_URLS_JSON+=","
+        MEDIA_DETAILS_JSON+=","
     fi
-    MEDIA_URLS_JSON+="\"${TEST_IMAGE_URLS[$i]}\""
+    MEDIA_DETAILS_JSON+="{\"url\":\"${TEST_IMAGE_URLS[$i]}\",\"mediaType\":\"IMAGE\",\"position\":${i},\"width\":800,\"height\":600,\"fileSizeKb\":100}"
 done
-MEDIA_URLS_JSON+="]"
+MEDIA_DETAILS_JSON+="]"
 
 POST_DATA=$(cat <<EOF
 {
     "title": "${TEST_POST_TITLE}",
-    "description": "${TEST_POST_DESCRIPTION}",
-    "mediaUrls": ${MEDIA_URLS_JSON}
+    "body": "${TEST_POST_DESCRIPTION}",
+    "summary": "E2E integration test post",
+    "visibility": "PUBLIC",
+    "categoryIds": [${CATEGORY_ID}],
+    "mediaDetails": ${MEDIA_DETAILS_JSON}
 }
 EOF
 )
