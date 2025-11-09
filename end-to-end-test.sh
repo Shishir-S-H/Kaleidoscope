@@ -534,6 +534,23 @@ EOF
             else
                 echo "  No AuthTokenFilter logs found for POST requests"
             fi
+            
+            # Show full backend logs around the time of the request
+            echo ""
+            echo "  Full backend logs for correlation ID (last 100 lines):"
+            if [ -n "$CORRELATION_ID_FROM_RESPONSE" ]; then
+                FULL_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=500 app 2>/dev/null | grep -A 10 -B 10 "$CORRELATION_ID_FROM_RESPONSE" | head -50 || echo "")
+                if [ -n "$FULL_LOGS" ]; then
+                    echo "$FULL_LOGS" | sed 's/^/    /'
+                else
+                    echo "  No logs found for correlation ID: $CORRELATION_ID_FROM_RESPONSE"
+                    echo "  Showing recent backend logs (last 30 lines) instead:"
+                    RECENT_FULL=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=30 app 2>/dev/null || echo "")
+                    if [ -n "$RECENT_FULL" ]; then
+                        echo "$RECENT_FULL" | sed 's/^/    /'
+                    fi
+                fi
+            fi
         fi
         
         HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
