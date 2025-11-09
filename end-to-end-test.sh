@@ -422,6 +422,25 @@ EOF
             echo -e "  ${GREEN}✅${NC} Token is valid for GET requests"
         fi
         
+        # Test token with a simple POST request to see if it's a POST-specific issue
+        echo "  Testing token with a simple POST request (to verify POST authentication works)..."
+        TEST_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"test": "invalid"}' \
+            2>&1)
+        TEST_POST_HTTP=$(echo "$TEST_POST_RESPONSE" | tail -1)
+        if [ "$TEST_POST_HTTP" = "401" ]; then
+            echo -e "  ${RED}❌${NC} POST authentication failed (HTTP 401) - this is the root cause"
+            echo "  The backend is rejecting POST requests even with a valid token"
+        elif [ "$TEST_POST_HTTP" = "400" ] || [ "$TEST_POST_HTTP" = "422" ]; then
+            echo -e "  ${GREEN}✅${NC} POST authentication works (HTTP $TEST_POST_HTTP) - request reached controller"
+            echo "  The issue is likely with the request body format, not authentication"
+        else
+            echo -e "  ${YELLOW}⚠️${NC}  POST request returned HTTP $TEST_POST_HTTP"
+            echo "  Response: $(echo "$TEST_POST_RESPONSE" | head -n -1 | head -3)"
+        fi
+        
         # Make the POST request with verbose error output
         echo "  Making POST request to create post..."
         
