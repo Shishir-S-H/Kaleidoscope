@@ -163,8 +163,9 @@ services:
       # These will be loaded from .env file via env_file directive
       # If not in host env, they'll be empty - need to source .env before running docker-compose
       - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
+      # Also set Spring Boot standard property names (Spring Boot converts env vars automatically)
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
       # Spring Boot configs - from .env file
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-production}
       - CONTEXT_PATH=${CONTEXT_PATH:-/kaleidoscope}
