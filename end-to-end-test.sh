@@ -784,6 +784,18 @@ if docker ps --format "{{.Names}}" | grep -q "^kaleidoscope-app$"; then
         if [ -n "$PENDING_DETAILS" ]; then
             echo "  Pending message details (first 5):"
             echo "$PENDING_DETAILS" | head -5 | sed 's/^/    /'
+            
+            # Calculate age of oldest pending message (in milliseconds)
+            OLDEST_IDLE=$(echo "$PENDING_DETAILS" | head -1 | awk '{print $3}' || echo "0")
+            if [ "$OLDEST_IDLE" -gt 0 ] 2>/dev/null; then
+                OLDEST_AGE_HOURS=$((OLDEST_IDLE / 1000 / 3600))
+                OLDEST_AGE_MINUTES=$(((OLDEST_IDLE / 1000) % 3600 / 60))
+                if [ "$OLDEST_AGE_HOURS" -gt 0 ] 2>/dev/null; then
+                    echo -e "  ${YELLOW}⚠️${NC}  Oldest pending message is ${OLDEST_AGE_HOURS}h ${OLDEST_AGE_MINUTES}m old (may need manual ACK)"
+                elif [ "$OLDEST_AGE_MINUTES" -gt 5 ] 2>/dev/null; then
+                    echo -e "  ${YELLOW}⚠️${NC}  Oldest pending message is ${OLDEST_AGE_MINUTES}m old"
+                fi
+            fi
         fi
         
         # Check backend logs for errors

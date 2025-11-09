@@ -355,7 +355,7 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
             "combinedCaption": aggregated["combinedCaption"],
             "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false",
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "correlationId": decoded_data.get("correlationId", "") if 'decoded_data' in locals() else ""
+            "correlationId": correlation_id  # Use the already extracted correlation_id
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)
