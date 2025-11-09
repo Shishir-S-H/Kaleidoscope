@@ -152,7 +152,7 @@ services:
       elasticsearch:
         condition: service_started
     env_file:
-      - ../.env
+      - .env
     environment:
       # Production overrides - point to internal Docker service names
       - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
