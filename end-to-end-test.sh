@@ -65,9 +65,9 @@ TEST_USER_ID=${TEST_USER_ID:-101}
 TEST_CORRELATION_ID="e2e-test-$(date +%s)"
 
 # Test image URLs (reliable sources)
-# Using Cloudinary demo images that should pass backend validation
-TEST_IMAGE_1="https://res.cloudinary.com/demo/image/upload/v1692873600/sample.jpg"
-TEST_IMAGE_2="https://res.cloudinary.com/demo/image/upload/v1692873600/sample2.jpg"
+# Using reliable public image URLs that should pass backend validation
+TEST_IMAGE_1="https://picsum.photos/800/600?random=1"
+TEST_IMAGE_2="https://picsum.photos/600/800?random=2"
 
 echo -e "${CYAN}Test Configuration:${NC}"
 echo "  Test Mode: $TEST_MODE"
@@ -330,6 +330,11 @@ if [ "$TEST_MODE" = "api" ]; then
             -d "{\"fileNames\":[\"test-image-1.jpg\",\"test-image-2.jpg\"],\"contentType\":\"POST\"}" \
             2>&1)
         
+        # Check if signature generation worked
+        if echo "$SIGNATURE_RESPONSE" | grep -q "401\|Unauthorized"; then
+            echo -e "  ${YELLOW}⚠️${NC}  Upload signature generation failed (401), trying post creation anyway..."
+        fi
+        
         # Create post with media
         POST_TITLE="E2E Test Post $(date +%s)"
         POST_BODY="This is an end-to-end test post created automatically. Testing AI processing pipeline."
@@ -368,6 +373,7 @@ EOF
 )
         
         echo "  Creating post with 2 images..."
+        echo "  Using JWT token: ${JWT_TOKEN:0:30}..."
         CREATE_POST_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${BACKEND_API_BASE}/posts" \
             -H "Authorization: Bearer ${JWT_TOKEN}" \
             -H "Content-Type: application/json" \
@@ -376,6 +382,8 @@ EOF
         
         HTTP_CODE=$(echo "$CREATE_POST_RESPONSE" | tail -1)
         POST_RESPONSE_BODY=$(echo "$CREATE_POST_RESPONSE" | head -n -1)
+        
+        echo "  HTTP Status: $HTTP_CODE"
         
         if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
             echo -e "  ${GREEN}✅${NC} Post created successfully"
@@ -406,6 +414,22 @@ EOF
         else
             echo -e "  ${RED}❌${NC} Post creation failed (HTTP $HTTP_CODE)"
             echo "  Response: $POST_RESPONSE_BODY"
+            
+            # If 401, try to debug token
+            if [ "$HTTP_CODE" = "401" ]; then
+                echo "  Debug: Checking token validity..."
+                # Try to use token for another request
+                TEST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${BACKEND_API_BASE}/categories?page=0&size=1" \
+                    -H "Authorization: Bearer ${JWT_TOKEN}" \
+                    2>&1)
+                TEST_HTTP=$(echo "$TEST_RESPONSE" | tail -1)
+                if [ "$TEST_HTTP" = "200" ]; then
+                    echo "  Token is valid for other endpoints, post creation might have different requirements"
+                else
+                    echo "  Token might be invalid or expired (HTTP $TEST_HTTP)"
+                fi
+            fi
+            
             echo ""
             echo "  Falling back to direct Redis mode..."
             TEST_MODE="direct"
