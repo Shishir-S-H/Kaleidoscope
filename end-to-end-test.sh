@@ -437,10 +437,25 @@ EOF
             -d "$CREATE_POST_BODY" \
             2>&1)
         
+        # Extract correlation ID from response if available
+        CORRELATION_ID_FROM_RESPONSE=$(echo "$CREATE_POST_RESPONSE" | grep -i "X-Correlation-ID" | sed 's/.*X-Correlation-ID: //' | tr -d '\r' | tr -d ' ' | head -1 || echo "")
+        
         # Check backend logs after request
         echo "  Checking backend logs after request..."
         sleep 2
-        BACKEND_LOGS_AFTER=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=50 app 2>/dev/null | grep -E "POST.*posts|createPost|PostController|AuthTokenFilter|JWT|Authentication|401|Unauthorized|Creating post" | tail -10 || echo "")
+        
+        # Check backend logs with multiple patterns
+        BACKEND_LOGS_AFTER=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "POST.*posts|/posts|createPost|PostController|AuthTokenFilter|JWT|Authentication|401|Unauthorized|Creating post" | tail -15 || echo "")
+        
+        # If we have a correlation ID, search for it specifically
+        if [ -n "$CORRELATION_ID_FROM_RESPONSE" ]; then
+            echo "  Found correlation ID in response: ${CORRELATION_ID_FROM_RESPONSE:0:20}..."
+            CORRELATION_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -i "$CORRELATION_ID_FROM_RESPONSE" | tail -10 || echo "")
+            if [ -n "$CORRELATION_LOGS" ]; then
+                echo "  Backend logs for this correlation ID:"
+                echo "$CORRELATION_LOGS" | sed 's/^/    /'
+            fi
+        fi
         
         # Debug: Show request details if it fails
         if echo "$CREATE_POST_RESPONSE" | tail -1 | grep -q "401"; then
@@ -449,11 +464,14 @@ EOF
             echo "    Token prefix: ${JWT_TOKEN:0:50}..."
             echo "    Token length: ${#JWT_TOKEN}"
             echo "    Request body size: $(echo "$CREATE_POST_BODY" | wc -c) bytes"
+            if [ -n "$CORRELATION_ID_FROM_RESPONSE" ]; then
+                echo "    Correlation ID: ${CORRELATION_ID_FROM_RESPONSE}"
+            fi
             echo ""
             
-            # Show curl verbose output for debugging
-            echo "  Curl verbose output:"
-            echo "$CREATE_POST_RESPONSE" | grep -E "< HTTP|< Authorization|> Authorization|> Content-Type" | head -10 | sed 's/^/    /' || echo "    No verbose output available"
+            # Show curl verbose output for debugging (filter out verbose connection info)
+            echo "  Curl response headers:"
+            echo "$CREATE_POST_RESPONSE" | grep -E "^< HTTP|< X-|< Content-Type|< Authorization" | head -10 | sed 's/^/    /' || echo "    No response headers available"
             echo ""
             
             # Check backend logs for the POST request
@@ -462,18 +480,29 @@ EOF
                 echo "$BACKEND_LOGS_AFTER" | sed 's/^/    /'
             else
                 echo "  ⚠️  No backend logs found for POST request"
+                echo "  Checking if backend is logging at all..."
+                RECENT_LOGS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=20 app 2>/dev/null | tail -5 || echo "")
+                if [ -n "$RECENT_LOGS" ]; then
+                    echo "  Recent backend logs (last 5 lines):"
+                    echo "$RECENT_LOGS" | sed 's/^/    /'
+                else
+                    echo "  ⚠️  No backend logs found at all - backend might not be logging"
+                fi
+                echo ""
                 echo "  This might indicate:"
-                echo "    - Request is not reaching the backend"
+                echo "    - Request is being rejected at security filter level"
+                echo "    - AuthTokenFilter is rejecting the request silently"
                 echo "    - Request is being blocked before reaching the controller"
-                echo "    - Backend is not logging the request"
             fi
             echo ""
             
             # Check for authentication errors specifically
-            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=100 app 2>/dev/null | grep -E "AuthTokenFilter.*POST|JWT.*POST|Authentication.*POST|401.*POST|Unauthorized.*POST" | tail -5 || echo "")
+            BACKEND_AUTH_ERRORS=$(docker-compose -f "$DOCKER_COMPOSE_FILE" logs --tail=200 app 2>/dev/null | grep -E "AuthTokenFilter|JWT|Authentication|401|Unauthorized" | tail -10 || echo "")
             if [ -n "$BACKEND_AUTH_ERRORS" ]; then
-                echo "  Backend authentication errors for POST:"
+                echo "  Backend authentication errors (last 10):"
                 echo "$BACKEND_AUTH_ERRORS" | sed 's/^/    /'
+            else
+                echo "  No authentication errors in backend logs"
             fi
         fi
         
