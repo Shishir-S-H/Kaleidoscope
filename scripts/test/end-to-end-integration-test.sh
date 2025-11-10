@@ -148,8 +148,8 @@ LOGIN_RESPONSE=$(curl -s -i -X POST "${BASE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"${TEST_EMAIL}\",\"password\":\"${TEST_PASSWORD}\"}")
 
-# Extract token from Authorization header
-JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "authorization:" | grep -o "Bearer [^ ]*" | cut -d' ' -f2)
+# Extract token from Authorization header (remove carriage return and newline)
+JWT_TOKEN=$(echo "$LOGIN_RESPONSE" | grep -i "authorization:" | grep -o "Bearer [^ ]*" | cut -d' ' -f2 | tr -d '\r\n')
 
 if [ -n "$JWT_TOKEN" ]; then
     log_success "User authentication successful"
