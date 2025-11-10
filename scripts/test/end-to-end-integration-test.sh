@@ -207,14 +207,53 @@ else
     log_success "Using category ID: ${CATEGORY_ID}"
 fi
 
-# Use existing Cloudinary URLs that are already tracked in the system
-# These URLs contain "kaleidoscope/posts" and should pass backend validation
-log_info "Using existing Cloudinary URLs for test images..."
-TEST_IMAGE_URLS=(
-    "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
-    "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
-)
-log_success "Using existing Cloudinary URLs: ${TEST_IMAGE_URLS[0]:0:80}..."
+# Generate upload signatures to get valid Cloudinary URLs with PENDING status
+log_info "Generating upload signatures for test images..."
+SIGNATURE_REQUEST='{"fileNames":["test-e2e-1.jpg","test-e2e-2.jpg"]}'
+SIGNATURE_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/posts/generate-upload-signatures" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${JWT_TOKEN}" \
+    -d "$SIGNATURE_REQUEST")
+
+# Extract publicIds and cloudName from signature response
+if echo "$SIGNATURE_RESPONSE" | grep -q '"success":true'; then
+    log_success "Upload signatures generated successfully"
+    
+    # Extract publicIds from signature response (format: "publicId":"kaleidoscope/posts/xxx")
+    PUBLIC_ID_1=$(echo "$SIGNATURE_RESPONSE" | grep -o '"publicId":"[^"]*' | head -1 | cut -d'"' -f4)
+    PUBLIC_ID_2=$(echo "$SIGNATURE_RESPONSE" | grep -o '"publicId":"[^"]*' | head -2 | tail -1 | cut -d'"' -f4)
+    CLOUD_NAME=$(echo "$SIGNATURE_RESPONSE" | grep -o '"cloudName":"[^"]*' | head -1 | cut -d'"' -f4)
+    
+    # Default cloud name if not found
+    if [ -z "$CLOUD_NAME" ]; then
+        CLOUD_NAME="dkadqnp9j"
+    fi
+    
+    if [ -n "$PUBLIC_ID_1" ] && [ -n "$PUBLIC_ID_2" ]; then
+        # Construct Cloudinary URLs: https://res.cloudinary.com/{cloudName}/image/upload/v1/{publicId}
+        TEST_IMAGE_URLS=(
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/${PUBLIC_ID_1}"
+            "https://res.cloudinary.com/${CLOUD_NAME}/image/upload/v1/${PUBLIC_ID_2}"
+        )
+        log_success "Using generated Cloudinary URLs with PENDING status: ${TEST_IMAGE_URLS[0]:0:80}..."
+    else
+        log_warning "Could not extract publicIds from signature response"
+        log_warning "Response: ${SIGNATURE_RESPONSE:0:300}"
+        log_warning "Falling back to provided URL (may fail if status is not PENDING)"
+        TEST_IMAGE_URLS=(
+            "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
+            "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
+        )
+    fi
+else
+    log_warning "Failed to generate upload signatures"
+    log_warning "Response: ${SIGNATURE_RESPONSE:0:300}"
+    log_warning "Falling back to provided URL (may fail if status is not PENDING)"
+    TEST_IMAGE_URLS=(
+        "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
+        "https://res.cloudinary.com/dkadqnp9j/image/upload/v1759946049/kaleidoscope/posts/1759946047852_832950b8.png"
+    )
+fi
 
 # Build mediaDetails array (required format)
 MEDIA_DETAILS_JSON="["
