@@ -1,7 +1,9 @@
 # Production Docker Compose - Cloud Optimized
-# Builds images locally (no volume mounts for production)
-
-# --- MODIFIED FOR NGINX + CERTBOT SSL ---
+#
+# This file is now configured with:
+# 1. Nginx as a reverse proxy for public HTTPS traffic.
+# 2. Certbot for automatic SSL certificate generation.
+# 3. Secure SSH Tunneling ports for Redis and Elasticsearch.
 
 services:
   content_moderation:
@@ -190,7 +192,7 @@ services:
       - MAIL_PASSWORD=${MAIL_PASSWORD}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
 
-    # --- CHANGE: Removed port. Nginx will handle traffic. ---
+    # --- SECURE CHANGE: Public port removed. Nginx is the entrypoint. ---
     # ports:
     #   - "${APP_PORT:-8080}:8080"
 
@@ -212,9 +214,11 @@ services:
     container_name: redis
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --protected-mode yes
-    # Remove public port exposure - only accessible within Docker network
-    # ports:
-    #   - "6379:6379"
+
+    # --- SECURE TUNNEL: Port exposed only to localhost for SSH Tunnel ---
+    ports:
+      - "127.0.0.1:6379:6379"
+
     volumes:
       - redis-data:/data
     networks:
@@ -240,11 +244,10 @@ services:
       - xpack.security.http.ssl.enabled=false
       - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-    # Remove public port exposure - only accessible within Docker network
-    # If external access needed, use firewall rules or reverse proxy
-    # ports:
-    #   - "9200:9200"
-    #   - "9300:9300"
+    # --- SECURE TUNNEL: Port exposed only to localhost for SSH Tunnel ---
+    ports:
+      - "127.0.0.1:9200:9200"
+
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -277,7 +280,7 @@ services:
       - certbot-etc:/etc/letsencrypt # Certbot certificates
       - certbot-www:/var/www/certbot # Certbot challenge files
     networks:
-      - kaleidoscope-network # <-- Must be on the same network
+      - kaleidoscope-network # <-- Must be on the same network as 'app'
     depends_on:
       - app # Make sure Nginx starts after your app is available
 
@@ -287,8 +290,6 @@ services:
     volumes:
       - certbot-etc:/etc/letsencrypt # Share certs
       - certbot-www:/var/www/certbot # Share challenge files
-    # Note: Certbot doesn't need to be on the network,
-    # it only writes to volumes.
 
 # --- END OF 'services:' BLOCK ---
 
@@ -296,8 +297,9 @@ networks:
   kaleidoscope-network:
     driver: bridge
 
+# --- NEW VOLUMES FOR SSL ---
 volumes:
   redis-data:
   es-data:
-  certbot-etc: # <-- ADD THIS
-  certbot-www: # <-- ADD THIS
+  certbot-etc: # Volume for Certbot certificates
+  certbot-www: # Volume for Certbot challenge files
