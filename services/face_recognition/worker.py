@@ -85,8 +85,17 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
     
     # The API should return a dict with 'faces_detected' and 'faces' list
     api_result = response.json()
+    
+    # Log detailed API response for debugging
+    faces_list = api_result.get("faces", [])
+    api_face_count = api_result.get("faces_detected", 0)
+    actual_face_count = len(faces_list)
+    
     LOGGER.debug("Received API response", extra={
-        "faces_detected": api_result.get("faces_detected", 0)
+        "api_faces_detected": api_face_count,
+        "actual_faces_in_list": actual_face_count,
+        "faces_list_length": len(faces_list),
+        "api_response_keys": list(api_result.keys())
     })
     
     return api_result
@@ -175,17 +184,29 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                 # Run face detection via Hugging Face API (with retry)
                 LOGGER.info("Detecting faces", extra={"media_id": media_id, "correlation_id": correlation_id})
                 detection_result = process_face_detection(image_bytes)
+                
+                # Count faces from the actual faces list (more accurate than trusting API's faces_detected)
+                faces_list = detection_result.get('faces', [])
+                actual_face_count = len(faces_list)
+                api_face_count = detection_result.get('faces_detected', 0)
+                
+                # Log detailed information for debugging
                 LOGGER.info("Face detection complete", extra={
                     "media_id": media_id,
-                    "faces_detected": detection_result.get('faces_detected', 0),
+                    "api_faces_detected": api_face_count,
+                    "actual_faces_count": actual_face_count,
+                    "faces_list_length": len(faces_list),
                     "correlation_id": correlation_id
                 })
                 
+                # Use actual count from faces list (more reliable)
+                faces_detected = actual_face_count
+                
                 # Publish result to face-detection-results stream
                 # Format faces for backend consumption
-                faces_list = []
-                for face in detection_result.get('faces', []):
-                    faces_list.append({
+                formatted_faces_list = []
+                for face in faces_list:
+                    formatted_faces_list.append({
                         "faceId": face.get("face_id", str(uuid.uuid4())),
                         "bbox": json.dumps(face.get("bbox", [])),
                         "embedding": json.dumps(face.get("embedding", [])),
@@ -195,15 +216,15 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                 result_message = {
                     "mediaId": str(media_id),
                     "postId": str(post_id),
-                    "facesDetected": str(detection_result.get('faces_detected', 0)),
-                    "faces": json.dumps(faces_list),
+                    "facesDetected": str(faces_detected),
+                    "faces": json.dumps(formatted_faces_list),
                     "timestamp": datetime.utcnow().isoformat() + "Z"
                 }
                 
                 publisher.publish(STREAM_OUTPUT, result_message)
                 LOGGER.info("Published result", extra={
                     "media_id": media_id,
-                    "faces_detected": detection_result.get('faces_detected', 0),
+                    "faces_detected": faces_detected,
                     "stream": STREAM_OUTPUT,
                     "correlation_id": correlation_id
                 })

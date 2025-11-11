@@ -41,7 +41,7 @@ IMAGE_TAGS = [
 
 # Tagging configuration
 DEFAULT_TOP_N = int(os.getenv("DEFAULT_TOP_N", "5"))
-DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.05"))
+DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.01"))  # Lowered from 0.05 to 0.01 (1%) to capture more tags
 
 # Redis Streams configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -135,9 +135,23 @@ def process_image_tagging(image_bytes: bytes, top_n: int = None, threshold: floa
     # Call the Hugging Face API
     api_scores = call_hf_api(image_bytes)
     
+    # Log all scores for debugging
+    LOGGER.debug("API tag scores received", extra={
+        "total_tags": len(api_scores),
+        "top_5_scores": dict(sorted(api_scores.items(), key=lambda x: x[1], reverse=True)[:5])
+    })
+    
     # Filter tags by threshold and get top N
     filtered_tags = [(tag, score) for tag, score in api_scores.items() if score > threshold]
     sorted_tags = sorted(filtered_tags, key=lambda x: x[1], reverse=True)[:top_n]
+    
+    # If no tags above threshold, still return top N tags (even if below threshold) for better results
+    if not sorted_tags and api_scores:
+        sorted_tags = sorted(api_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        LOGGER.info("No tags above threshold, returning top tags anyway", extra={
+            "threshold": threshold,
+            "top_tags": [tag for tag, _ in sorted_tags]
+        })
     
     # Build response
     response = {

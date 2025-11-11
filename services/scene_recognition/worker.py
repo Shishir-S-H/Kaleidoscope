@@ -34,7 +34,7 @@ HF_API_TOKEN = os.getenv("HF_API_TOKEN")
 SCENE_LABELS = os.getenv("SCENE_LABELS", "beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic").split(",")
 
 # Scene recognition configuration
-DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.01"))
+DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.005"))  # Lowered from 0.01 to 0.005 (0.5%) to capture more scenes
 
 # Redis Streams configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -133,10 +133,16 @@ def process_scene_recognition(image_bytes: bytes, threshold: float = None) -> Di
             if "label" in item and "score" in item:
                 scores[item["label"]] = item["score"]
     
+    # Log all scores for debugging
+    LOGGER.debug("API scene scores received", extra={
+        "total_scenes": len(scores),
+        "top_5_scores": dict(sorted(scores.items(), key=lambda x: x[1], reverse=True)[:5]) if scores else {}
+    })
+    
     # Filter scenes by threshold
     filtered_scenes = {scene: score for scene, score in scores.items() if score > threshold}
     
-    # Get best scene
+    # Get best scene (always use the top score, even if below threshold)
     if scores:
         sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         best_scene = sorted_scores[0][0]
@@ -144,6 +150,16 @@ def process_scene_recognition(image_bytes: bytes, threshold: float = None) -> Di
     else:
         best_scene = "unknown"
         best_score = 0.0
+    
+    # If no scenes above threshold but we have scores, include top scenes anyway
+    if not filtered_scenes and scores:
+        # Include top 3 scenes even if below threshold
+        top_scenes = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
+        filtered_scenes = {scene: score for scene, score in top_scenes}
+        LOGGER.info("No scenes above threshold, including top scenes anyway", extra={
+            "threshold": threshold,
+            "top_scenes": list(filtered_scenes.keys())
+        })
     
     # Build response
     response = {
@@ -229,11 +245,17 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                 })
                 
                 # Publish result to ml-insights-results stream
+                # Include all scenes from scores (not just filtered ones) for better results
+                scenes_list = list(scene_result['scores'].keys()) if scene_result['scores'] else []
+                # If no scenes in scores but we have a scene, include it
+                if not scenes_list and scene_result['scene'] != "unknown":
+                    scenes_list = [scene_result['scene']]
+                
                 result_message = {
                     "mediaId": str(media_id),
                     "postId": str(post_id),
                     "service": "scene_recognition",
-                    "scenes": json.dumps(list(scene_result['scores'].keys())),
+                    "scenes": json.dumps(scenes_list),
                     "timestamp": datetime.utcnow().isoformat() + "Z"
                 }
                 
