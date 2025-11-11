@@ -395,12 +395,13 @@ def _snake_to_camel(snake_str: str) -> str:
     return components[0] + ''.join(x.capitalize() for x in components[1:])
 
 
-def _normalize_timestamp(raw_value: str) -> Optional[str]:
+def _normalize_timestamp(raw_value: Any) -> Optional[str]:
     """
-    Normalize timestamp strings returned from PostgreSQL to ISO8601 (UTC) format.
+    Normalize timestamp values returned from PostgreSQL to ISO8601 (UTC) format.
+    Handles both datetime objects and timestamp strings.
 
     Args:
-        raw_value: Timestamp string (e.g. '2025-11-11 15:24:00.955427+00:00')
+        raw_value: Timestamp (datetime object or string like '2025-11-11 15:24:00.955427+00:00')
 
     Returns:
         ISO8601 string or original value if parsing fails.
@@ -408,28 +409,36 @@ def _normalize_timestamp(raw_value: str) -> Optional[str]:
     if not raw_value:
         return raw_value
 
-    # Attempt to parse common Postgres timestamp formats
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+    # If it's already a datetime object (from psycopg2), convert directly
+    if isinstance(raw_value, datetime.datetime):
+        if raw_value.tzinfo is None:
+            raw_value = raw_value.replace(tzinfo=datetime.timezone.utc)
+        return raw_value.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # If it's a string, parse it
+    if isinstance(raw_value, str):
+        # Attempt to parse common Postgres timestamp formats
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.datetime.strptime(raw_value, fmt)
+                # Ensure timezone aware; assume UTC if missing tz info
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            except ValueError:
+                continue
+
+        # Fallback to fromisoformat (handles 'YYYY-MM-DDTHH:MM:SS' variants)
         try:
-            dt = datetime.datetime.strptime(raw_value, fmt)
-            # Ensure timezone aware; assume UTC if missing tz info
+            dt = datetime.datetime.fromisoformat(raw_value)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=datetime.timezone.utc)
             return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
         except ValueError:
-            continue
+            pass
 
-    # Fallback to fromisoformat (handles 'YYYY-MM-DDTHH:MM:SS' variants)
-    try:
-        dt = datetime.datetime.fromisoformat(raw_value)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
-        return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
-    except ValueError:
-        pass
-
-    LOGGER.warning("Failed to normalize timestamp, returning raw value", extra={"value": raw_value})
-    return raw_value
+    LOGGER.warning("Failed to normalize timestamp, returning raw value", extra={"value": raw_value, "type": type(raw_value).__name__})
+    return str(raw_value) if raw_value is not None else None
 
 
 def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncHandler):
