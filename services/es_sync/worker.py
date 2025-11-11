@@ -399,12 +399,14 @@ def _normalize_timestamp(raw_value: Any) -> Optional[str]:
     """
     Normalize timestamp values returned from PostgreSQL to ISO8601 (UTC) format.
     Handles both datetime objects and timestamp strings.
+    
+    Elasticsearch expects format: uuuu-MM-dd'T'HH:mm:ss.SSSSSS (without Z suffix)
 
     Args:
         raw_value: Timestamp (datetime object or string like '2025-11-11 15:24:00.955427+00:00')
 
     Returns:
-        ISO8601 string or original value if parsing fails.
+        ISO8601 string in format YYYY-MM-DDTHH:mm:ss.SSSSSS (without Z) or original value if parsing fails.
     """
     if not raw_value:
         return raw_value
@@ -413,10 +415,17 @@ def _normalize_timestamp(raw_value: Any) -> Optional[str]:
     if isinstance(raw_value, datetime.datetime):
         if raw_value.tzinfo is None:
             raw_value = raw_value.replace(tzinfo=datetime.timezone.utc)
-        return raw_value.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        # Convert to UTC and format without Z suffix (Elasticsearch expects uuuu-MM-dd'T'HH:mm:ss.SSSSSS)
+        utc_dt = raw_value.astimezone(datetime.timezone.utc)
+        # Format as YYYY-MM-DDTHH:mm:ss.SSSSSS (no timezone suffix)
+        return utc_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
     # If it's a string, parse it
     if isinstance(raw_value, str):
+        # Handle strings that already have Z suffix
+        if raw_value.endswith('Z'):
+            raw_value = raw_value[:-1] + '+00:00'
+        
         # Attempt to parse common Postgres timestamp formats
         for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
             try:
@@ -424,16 +433,20 @@ def _normalize_timestamp(raw_value: Any) -> Optional[str]:
                 # Ensure timezone aware; assume UTC if missing tz info
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=datetime.timezone.utc)
-                return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+                # Convert to UTC and format without Z suffix
+                utc_dt = dt.astimezone(datetime.timezone.utc)
+                return utc_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
             except ValueError:
                 continue
 
         # Fallback to fromisoformat (handles 'YYYY-MM-DDTHH:MM:SS' variants)
         try:
-            dt = datetime.datetime.fromisoformat(raw_value)
+            dt = datetime.datetime.fromisoformat(raw_value.replace('Z', '+00:00'))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=datetime.timezone.utc)
-            return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            # Convert to UTC and format without Z suffix
+            utc_dt = dt.astimezone(datetime.timezone.utc)
+            return utc_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
         except ValueError:
             pass
 
