@@ -4,6 +4,7 @@ Elasticsearch Sync Service
 Syncs data from PostgreSQL read models to Elasticsearch indices.
 """
 
+import datetime
 import json
 import os
 import re
@@ -358,6 +359,9 @@ def map_postgresql_to_elasticsearch(table_name: str, pg_data: Dict[str, Any]) ->
         # Handle array fields (PostgreSQL arrays)
         if isinstance(value, list):
             es_doc[es_key] = value
+        # Handle timestamp fields - convert to ISO8601 (Elasticsearch expects RFC 3339)
+        elif key in {"created_at", "updated_at", "last_modified_at", "processed_at"} and value:
+            es_doc[es_key] = _normalize_timestamp(value)
         # Handle JSON string fields
         elif isinstance(value, str) and (key.endswith("_embedding") or "embedding" in key.lower()):
             # Try to parse as JSON array
@@ -389,6 +393,43 @@ def _snake_to_camel(snake_str: str) -> str:
     """Convert snake_case to camelCase."""
     components = snake_str.split('_')
     return components[0] + ''.join(x.capitalize() for x in components[1:])
+
+
+def _normalize_timestamp(raw_value: str) -> Optional[str]:
+    """
+    Normalize timestamp strings returned from PostgreSQL to ISO8601 (UTC) format.
+
+    Args:
+        raw_value: Timestamp string (e.g. '2025-11-11 15:24:00.955427+00:00')
+
+    Returns:
+        ISO8601 string or original value if parsing fails.
+    """
+    if not raw_value:
+        return raw_value
+
+    # Attempt to parse common Postgres timestamp formats
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.datetime.strptime(raw_value, fmt)
+            # Ensure timezone aware; assume UTC if missing tz info
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        except ValueError:
+            continue
+
+    # Fallback to fromisoformat (handles 'YYYY-MM-DDTHH:MM:SS' variants)
+    try:
+        dt = datetime.datetime.fromisoformat(raw_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    except ValueError:
+        pass
+
+    LOGGER.warning("Failed to normalize timestamp, returning raw value", extra={"value": raw_value})
+    return raw_value
 
 
 def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncHandler):

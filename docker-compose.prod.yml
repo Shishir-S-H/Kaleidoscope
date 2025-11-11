@@ -127,6 +127,8 @@ services:
       dockerfile: ./services/es_sync/Dockerfile
     container_name: es_sync
     restart: always
+    env_file:
+      - .env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
@@ -135,11 +137,6 @@ services:
       - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
       - DB_USERNAME=${DB_USERNAME}
       - DB_PASSWORD=${DB_PASSWORD}
-      # Fallback individual variables (if SPRING_DATASOURCE_URL not set)
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT:-5432}
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
     depends_on:
       - redis
       - elasticsearch
