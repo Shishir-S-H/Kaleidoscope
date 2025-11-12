@@ -133,6 +133,7 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
         })
         
         if isinstance(tags, list) and isinstance(tag_scores, list):
+            # Both tags and scores are lists - zip them together
             if len(tags) == len(tag_scores):
                 for tag, score in zip(tags, tag_scores):
                     if tag is not None and score is not None:
@@ -147,6 +148,17 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
                     "tags_len": len(tags),
                     "scores_len": len(tag_scores)
                 })
+        elif isinstance(tags, list) and isinstance(tag_scores, dict):
+            # Tags is a list, scores is a dict mapping tag -> score
+            for tag in tags:
+                if tag is not None and tag in tag_scores:
+                    score = tag_scores[tag]
+                    if score is not None:
+                        try:
+                            score_float = float(score) if not isinstance(score, (int, float)) else score
+                            scores[tag] = score_float
+                        except (ValueError, TypeError):
+                            LOGGER.warning("Skipping non-numeric score", extra={"tag": tag, "score": score})
         else:
             # Fallback: treat dict key/value pairs as label -> score when numeric
             for key, value in api_result.items():
