@@ -55,4 +55,5 @@ jobs:
           platforms: linux/amd64
 
       - name: Image digest
-        run: echo "Image pushed successfully: ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest"
+        run: |
+          echo "Image pushed successfully: ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest"
