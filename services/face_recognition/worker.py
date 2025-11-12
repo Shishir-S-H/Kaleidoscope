@@ -206,18 +206,23 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                 # Format faces for backend consumption
                 formatted_faces_list = []
                 for face in faces_list:
+                    # bbox and embedding should be lists/arrays, not JSON strings
+                    # They will be serialized when the entire faces list is JSON-encoded
+                    bbox = face.get("bbox", [])
+                    embedding = face.get("embedding", [])
+                    
                     formatted_faces_list.append({
                         "faceId": face.get("face_id", str(uuid.uuid4())),
-                        "bbox": json.dumps(face.get("bbox", [])),
-                        "embedding": json.dumps(face.get("embedding", [])),
-                        "confidence": str(face.get("confidence", 0.0))
+                        "bbox": bbox,  # Keep as list, will be JSON-encoded with faces list
+                        "embedding": embedding,  # Keep as list, will be JSON-encoded with faces list
+                        "confidence": face.get("confidence", 0.0)  # Keep as number
                     })
                 
                 result_message = {
                     "mediaId": str(media_id),
                     "postId": str(post_id),
                     "facesDetected": str(faces_detected),
-                    "faces": json.dumps(formatted_faces_list),
+                    "faces": json.dumps(formatted_faces_list),  # Single JSON encoding of the entire list
                     "timestamp": datetime.utcnow().isoformat() + "Z"
                 }
                 

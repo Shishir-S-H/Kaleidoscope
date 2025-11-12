@@ -122,19 +122,36 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
     elif isinstance(api_result, dict):
         tags = api_result.get("tags")
         tag_scores = api_result.get("scores")
+        
+        # Log the structure for debugging
+        LOGGER.info("API returned dict response", extra={
+            "keys": list(api_result.keys()),
+            "tags_type": type(tags).__name__ if tags is not None else "None",
+            "tag_scores_type": type(tag_scores).__name__ if tag_scores is not None else "None",
+            "tags_length": len(tags) if isinstance(tags, list) else None,
+            "tag_scores_length": len(tag_scores) if isinstance(tag_scores, list) else None
+        })
+        
         if isinstance(tags, list) and isinstance(tag_scores, list):
-            for tag, score in zip(tags, tag_scores):
-                if tag is not None:
-                    scores[tag] = score
+            if len(tags) == len(tag_scores):
+                for tag, score in zip(tags, tag_scores):
+                    if tag is not None and score is not None:
+                        # Ensure score is numeric
+                        try:
+                            score_float = float(score) if not isinstance(score, (int, float)) else score
+                            scores[tag] = score_float
+                        except (ValueError, TypeError):
+                            LOGGER.warning("Skipping non-numeric score", extra={"tag": tag, "score": score})
+            else:
+                LOGGER.warning("Tags and scores lists have different lengths", extra={
+                    "tags_len": len(tags),
+                    "scores_len": len(tag_scores)
+                })
         else:
             # Fallback: treat dict key/value pairs as label -> score when numeric
             for key, value in api_result.items():
-                if isinstance(value, (int, float)):
+                if key not in ["tags", "scores"] and isinstance(value, (int, float)):
                     scores[key] = value
-        LOGGER.info("API returned dict response", extra={
-            "keys": list(api_result.keys()),
-            "parsed_scores": len(scores)
-        })
     
     LOGGER.info("Parsed tag scores", extra={
         "scores_count": len(scores),
