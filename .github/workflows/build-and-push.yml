@@ -46,4 +46,4 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Image digest
-        run: echo "Image pushed successfully"
+        run: echo "Image pushed successfully: ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest"

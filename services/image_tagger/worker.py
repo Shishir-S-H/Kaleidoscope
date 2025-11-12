@@ -104,7 +104,14 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
     if isinstance(api_result, dict) and "results" in api_result:
         api_result = api_result["results"]  # Extract list from our Space format
     
-    LOGGER.debug("Received API response", extra={"result_count": len(api_result) if isinstance(api_result, list) else 0})
+    # Log API response for debugging
+    result_count = len(api_result) if isinstance(api_result, list) else (1 if api_result else 0)
+    LOGGER.info("Received API response", extra={
+        "result_count": result_count,
+        "result_type": type(api_result).__name__,
+        "is_list": isinstance(api_result, list),
+        "is_dict": isinstance(api_result, dict)
+    })
     
     # Convert to a dictionary of tag: score
     scores = {}
@@ -112,6 +119,14 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
         for item in api_result:
             if "label" in item and "score" in item:
                 scores[item["label"]] = item["score"]
+    elif isinstance(api_result, dict):
+        # Handle case where API returns dict directly
+        LOGGER.warning("API returned dict instead of list", extra={"keys": list(api_result.keys())})
+    
+    LOGGER.info("Parsed tag scores", extra={
+        "scores_count": len(scores),
+        "sample_scores": dict(list(scores.items())[:3]) if scores else {}
+    })
     
     return scores
 
@@ -135,11 +150,17 @@ def process_image_tagging(image_bytes: bytes, top_n: int = None, threshold: floa
     # Call the Hugging Face API
     api_scores = call_hf_api(image_bytes)
     
-    # Log all scores for debugging
-    LOGGER.debug("API tag scores received", extra={
-        "total_tags": len(api_scores),
-        "top_5_scores": dict(sorted(api_scores.items(), key=lambda x: x[1], reverse=True)[:5])
-    })
+    # Log all scores for debugging (INFO level so we can see it)
+    if api_scores:
+        LOGGER.info("API tag scores received", extra={
+            "total_tags": len(api_scores),
+            "top_5_scores": dict(sorted(api_scores.items(), key=lambda x: x[1], reverse=True)[:5]),
+            "threshold": threshold
+        })
+    else:
+        LOGGER.warning("API returned empty tag scores - no tags detected", extra={
+            "threshold": threshold
+        })
     
     # Filter tags by threshold and get top N
     filtered_tags = [(tag, score) for tag, score in api_scores.items() if score > threshold]
@@ -150,7 +171,12 @@ def process_image_tagging(image_bytes: bytes, top_n: int = None, threshold: floa
         sorted_tags = sorted(api_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
         LOGGER.info("No tags above threshold, returning top tags anyway", extra={
             "threshold": threshold,
-            "top_tags": [tag for tag, _ in sorted_tags]
+            "top_tags": [tag for tag, _ in sorted_tags],
+            "top_scores": {tag: round(score, 4) for tag, score in sorted_tags}
+        })
+    elif not sorted_tags and not api_scores:
+        LOGGER.warning("No tags available from API - returning empty tags", extra={
+            "threshold": threshold
         })
     
     # Build response

@@ -1,224 +1,29 @@
-# Production Docker Compose - Cloud Optimized
+# Unified Production Docker Compose - Kaleidoscope AI Services
 #
-# This file is now configured with:
-# 1. Nginx as a reverse proxy for public HTTPS traffic.
-# 2. Certbot for automatic SSL certificate generation.
-# 3. Secure SSH Tunneling ports for Redis and Elasticsearch.
+# This file orchestrates all services with proper startup order:
+# 1. Infrastructure: redis → elasticsearch (with healthchecks)
+# 2. Backend: app (depends on redis/elasticsearch)
+# 3. AI Services: All 7 services (depend on redis)
+# 4. Reverse Proxy: nginx (depends on app)
+#
+# Image Strategy:
+# - Backend: Pulls from ajayprabhu2004/kaleidoscope:backend-latest
+# - AI Services: Pull from shishir01/kaleidoscope-{service}:latest
+# - Infrastructure: Official images (redis, elasticsearch, nginx, certbot)
 
 services:
-  content_moderation:
-    build:
-      context: .
-      dockerfile: ./services/content_moderation/Dockerfile
-    container_name: content_moderation
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - HF_API_URL=${HF_API_URL_CONTENT_MODERATION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  image_tagger:
-    build:
-      context: .
-      dockerfile: ./services/image_tagger/Dockerfile
-    container_name: image_tagger
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - HF_API_URL=${HF_API_URL_IMAGE_TAGGER}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  scene_recognition:
-    build:
-      context: .
-      dockerfile: ./services/scene_recognition/Dockerfile
-    container_name: scene_recognition
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - HF_API_URL=${HF_API_URL_SCENE_RECOGNITION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-      - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  image_captioning:
-    build:
-      context: .
-      dockerfile: ./services/image_captioning/Dockerfile
-    container_name: image_captioning
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - HF_API_URL=${HF_API_URL_IMAGE_CAPTIONING}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  face_recognition:
-    build:
-      context: .
-      dockerfile: ./services/face_recognition/Dockerfile
-    container_name: face_recognition
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - HF_API_URL=${HF_API_URL_FACE_RECOGNITION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  post_aggregator:
-    build:
-      context: .
-      dockerfile: ./services/post_aggregator/Dockerfile
-    container_name: post_aggregator
-    restart: always
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-    depends_on:
-      - redis
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  es_sync:
-    build:
-      context: .
-      dockerfile: ./services/es_sync/Dockerfile
-    container_name: es_sync
-    restart: always
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
-      # PostgreSQL connection (Neon DB) - from .env file
-      # Can use SPRING_DATASOURCE_URL or individual DB variables
-      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
-    depends_on:
-      - redis
-      - elasticsearch
-    networks:
-      - kaleidoscope-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  app:
-    # Backend image from ajayprabhu2004/rajay04 registry
-    image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
-    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_started
-    env_file:
-      - .env
-    environment:
-      # Production overrides - point to internal Docker service names
-      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
-      - SPRING_ELASTICSEARCH_USERNAME=elastic
-      - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      # PostgreSQL (Neon DB) - explicitly set to ensure it's loaded
-      # These will be loaded from .env file via env_file directive
-      # If not in host env, they'll be empty - need to source .env before running docker-compose
-      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
-      # Also set Spring Boot standard property names (Spring Boot converts env vars automatically)
-      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME}
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
-      # Spring Boot configs - from .env file
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-production}
-      - CONTEXT_PATH=${CONTEXT_PATH:-/kaleidoscope}
-      - APP_BASE_URL=${APP_BASE_URL}
-      # Other configs from .env
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-      - JWT_SECRET=${JWT_SECRET}
-      - MAIL_HOST=${MAIL_HOST}
-      - MAIL_PORT=${MAIL_PORT}
-      - MAIL_USERNAME=${MAIL_USERNAME}
-      - MAIL_PASSWORD=${MAIL_PASSWORD}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
-
-    # --- SECURE CHANGE: Public port removed. Nginx is the entrypoint. ---
-    # ports:
-    #   - "${APP_PORT:-8080}:8080"
-
-    networks:
-      - kaleidoscope-network
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
+  # ============================================
+  # Infrastructure Layer (Start First)
+  # ============================================
 
   redis:
     image: redis:alpine
     container_name: redis
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --protected-mode yes
-
-    # --- SECURE TUNNEL: Port exposed only to localhost for SSH Tunnel ---
+    # Secure: Port exposed only to localhost for SSH Tunnel
     ports:
       - "127.0.0.1:6379:6379"
-
     volumes:
       - redis-data:/data
     networks:
@@ -228,6 +33,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -244,10 +50,9 @@ services:
       - xpack.security.http.ssl.enabled=false
       - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-    # --- SECURE TUNNEL: Port exposed only to localhost for SSH Tunnel ---
+    # Secure: Port exposed only to localhost for SSH Tunnel
     ports:
       - "127.0.0.1:9200:9200"
-
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -261,13 +66,215 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 2G
 
-  # --- NEW SERVICES FOR SSL ---
+  # ============================================
+  # Backend Layer (Depends on Infrastructure)
+  # ============================================
+
+  app:
+    # Backend image from ajayprabhu2004 registry
+    image: ${DOCKER_REGISTRY:-ajayprabhu2004}/kaleidoscope:backend-${APP_VERSION:-latest}
+    container_name: ${APP_CONTAINER_NAME:-kaleidoscope-app}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Production overrides - point to internal Docker service names
+      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
+      - SPRING_ELASTICSEARCH_USERNAME=elastic
+      - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      # PostgreSQL (Neon DB) - explicitly set to ensure it's loaded
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+      # Spring Boot configs - from .env file
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-production}
+      - CONTEXT_PATH=${CONTEXT_PATH:-/kaleidoscope}
+      - APP_BASE_URL=${APP_BASE_URL}
+      # Other configs from .env
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - MAIL_HOST=${MAIL_HOST}
+      - MAIL_PORT=${MAIL_PORT}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+    # Secure: Public port removed. Nginx is the entrypoint.
+    networks:
+      - kaleidoscope-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # ============================================
+  # AI Services Layer (Depend on Redis)
+  # ============================================
+
+  content_moderation:
+    # Pull from Docker Hub (shishir01 registry)
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-content_moderation:latest
+    container_name: content_moderation
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_CONTENT_MODERATION}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  image_tagger:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_tagger:latest
+    container_name: image_tagger
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_IMAGE_TAGGER}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  scene_recognition:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-scene_recognition:latest
+    container_name: scene_recognition
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_SCENE_RECOGNITION}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+      - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  image_captioning:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_captioning:latest
+    container_name: image_captioning
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_IMAGE_CAPTIONING}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  face_recognition:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_recognition:latest
+    container_name: face_recognition
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_API_URL=${HF_API_URL_FACE_RECOGNITION}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  post_aggregator:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-post_aggregator:latest
+    container_name: post_aggregator
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  es_sync:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-es_sync:latest
+    container_name: es_sync
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
+      # PostgreSQL connection (Neon DB) - from .env file
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ============================================
+  # Reverse Proxy Layer (Depends on App)
+  # ============================================
+
   nginx:
     image: nginx:alpine
     container_name: nginx-proxy
@@ -276,20 +283,21 @@ services:
       - "80:80" # Public port for HTTP and SSL challenge
       - "443:443" # Public port for HTTPS
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Our Nginx config
-      - certbot-etc:/etc/letsencrypt # Certbot certificates
-      - certbot-www:/var/www/certbot # Certbot challenge files
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
     networks:
-      - kaleidoscope-network # <-- Must be on the same network as 'app'
+      - kaleidoscope-network
     depends_on:
-      - app # Make sure Nginx starts after your app is available
+      app:
+        condition: service_started
 
   certbot:
     image: certbot/certbot
     container_name: certbot
     volumes:
-      - certbot-etc:/etc/letsencrypt # Share certs
-      - certbot-www:/var/www/certbot # Share challenge files
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
 
 # --- END OF 'services:' BLOCK ---
 
