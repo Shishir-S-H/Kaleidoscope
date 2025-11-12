@@ -127,6 +127,20 @@ class RedisStreamConsumer:
             except KeyboardInterrupt:
                 logger.info("Consumer interrupted by user")
                 break
+            except redis.exceptions.ResponseError as e:
+                error_str = str(e)
+                if "NOGROUP" in error_str and auto_create_group:
+                    # Consumer group doesn't exist - try to create it
+                    logger.warning(f"Consumer group '{self.consumer_group}' not found for stream '{self.stream_name}'. Attempting to create...")
+                    try:
+                        self.create_consumer_group(start_id="0")
+                        logger.info(f"Successfully created consumer group '{self.consumer_group}' for stream '{self.stream_name}'")
+                    except Exception as create_error:
+                        logger.error(f"Failed to create consumer group: {create_error}", exc_info=True)
+                        time.sleep(2)  # Wait longer before retry if creation failed
+                else:
+                    logger.error(f"Redis error in consumer loop: {e}", exc_info=True)
+                    time.sleep(1)  # Brief pause before retry
             except Exception as e:
                 logger.error(f"Error in consumer loop: {e}", exc_info=True)
                 time.sleep(1)  # Brief pause before retry
