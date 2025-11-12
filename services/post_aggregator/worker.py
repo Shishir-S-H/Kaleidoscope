@@ -8,8 +8,9 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Set
+from typing import Dict, List, Any, Set, Optional
 from collections import Counter
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -36,6 +37,212 @@ CONSUMER_GROUP = "post-aggregator-group"
 CONSUMER_NAME = "post-aggregator-worker-1"
 INSIGHTS_STREAM = "ml-insights-results"
 FACES_STREAM = "face-detection-results"
+
+AGGREGATION_WAIT_SECONDS = float(os.getenv("AGGREGATION_WAIT_SECONDS", "6"))
+AGGREGATION_POLL_INTERVAL = float(os.getenv("AGGREGATION_POLL_INTERVAL", "0.5"))
+REQUIRED_SERVICES: Set[str] = {"moderation", "tagging", "scene_recognition", "image_captioning"}
+OPTIONAL_SERVICES: Set[str] = {"face"}
+
+
+def _try_parse_json(value: Any) -> Any:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        try:
+            return json.loads(trimmed)
+        except ValueError:
+            return None
+    return value
+
+
+def _normalize_media_ids(raw_value: Any) -> Set[str]:
+    parsed = _try_parse_json(raw_value)
+    ids: Set[str] = set()
+    if isinstance(parsed, (list, tuple, set)):
+        ids = {str(item).strip() for item in parsed if str(item).strip()}
+    elif isinstance(raw_value, str):
+        cleaned = raw_value.strip().strip("[]")
+        if cleaned:
+            ids = {item.strip() for item in cleaned.split(",") if item.strip()}
+    elif raw_value not in (None, ""):
+        ids = {str(raw_value)}
+    return ids
+
+
+def _fetch_stream_entries(redis_client: redis.StrictRedis, stream: str, post_id: int, count: int = 200) -> List[Dict[str, Any]]:
+    try:
+        entries = redis_client.xrevrange(stream, max="+", min="-", count=count)
+    except Exception as err:
+        LOGGER.error("Failed to read stream entries", extra={
+            "stream": stream,
+            "post_id": post_id,
+            "error": str(err)
+        })
+        return []
+
+    results: List[Dict[str, Any]] = []
+    target_post = str(post_id)
+    for entry_id, values in entries:
+        post_val = values.get("postId") or values.get("post_id")
+        if post_val != target_post:
+            continue
+        entry_dict = dict(values)
+        entry_dict["_id"] = entry_id
+        entry_dict["_stream"] = stream
+        results.append(entry_dict)
+    return results
+
+
+def _merge_media_entry(media_map: Dict[str, Dict[str, Any]], entry: Any) -> None:
+    if isinstance(entry, str):
+        parsed = _try_parse_json(entry)
+        if not isinstance(parsed, dict):
+            return
+        entry = parsed
+    if not isinstance(entry, dict):
+        return
+
+    media_id = entry.get("mediaId") or entry.get("media_id")
+    if not media_id:
+        return
+    media_id = str(media_id)
+
+    media_entry = media_map.setdefault(media_id, {"mediaId": media_id, "_services": set()})
+
+    service = entry.get("service")
+    if not service and ("facesDetected" in entry or "faces" in entry):
+        service = "face"
+
+    if service:
+        media_entry["_services"].add(service)
+
+    for key in (
+        "tags",
+        "scenes",
+        "caption",
+        "isSafe",
+        "moderationConfidence",
+        "facesDetected",
+        "faces",
+        "mediaUrl",
+        "timestamp",
+    ):
+        if key in entry and entry[key] not in (None, ""):
+            media_entry[key] = entry[key]
+
+
+def _finalize_media_map(media_map: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    finalized: List[Dict[str, Any]] = []
+    for data in media_map.values():
+        record = dict(data)
+        record.pop("_services", None)
+        finalized.append(record)
+    return finalized
+
+
+def _has_required_services(
+    media_map: Dict[str, Dict[str, Any]],
+    expected_media_ids: Set[str],
+    expected_media_count: Optional[int],
+) -> bool:
+    if expected_media_ids:
+        targets = {str(media_id) for media_id in expected_media_ids}
+    elif expected_media_count:
+        if len(media_map) < expected_media_count:
+            return False
+        targets = set(media_map.keys())
+    else:
+        return False
+
+    for media_id in targets:
+        record = media_map.get(media_id)
+        if not record:
+            return False
+        services: Set[str] = record.get("_services", set())
+        if not REQUIRED_SERVICES.issubset(services):
+            return False
+    return True
+
+
+def collect_media_insights(
+    post_id: int,
+    correlation_id: str,
+    initial_insights: List[Dict[str, Any]],
+    expected_media_ids: Set[str],
+    expected_media_count: Optional[int],
+) -> List[Dict[str, Any]]:
+    media_map: Dict[str, Dict[str, Any]] = {}
+    for insight in initial_insights or []:
+        _merge_media_entry(media_map, insight)
+
+    try:
+        redis_client = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
+    except Exception as err:
+        LOGGER.error("Failed to initialize Redis client for aggregation fetch", extra={
+            "post_id": post_id,
+            "error": str(err),
+            "correlation_id": correlation_id
+        })
+        return _finalize_media_map(media_map)
+
+    seen_ids: Set[str] = set()
+    deadline = time.time() + AGGREGATION_WAIT_SECONDS
+
+    while True:
+        if _has_required_services(media_map, expected_media_ids, expected_media_count):
+            break
+
+        if time.time() >= deadline:
+            break
+
+        new_entries: List[Dict[str, Any]] = []
+        for stream in (INSIGHTS_STREAM, FACES_STREAM):
+            entries = _fetch_stream_entries(redis_client, stream, post_id)
+            for entry in entries:
+                entry_id = entry.pop("_id", None)
+                if entry_id and entry_id in seen_ids:
+                    continue
+                if entry_id:
+                    seen_ids.add(entry_id)
+                new_entries.append(entry)
+
+        if not new_entries:
+            if not expected_media_ids and expected_media_count is None and media_map:
+                break
+            time.sleep(AGGREGATION_POLL_INTERVAL)
+            continue
+
+        for entry in new_entries:
+            _merge_media_entry(media_map, entry)
+
+        if not expected_media_ids and expected_media_count is None and media_map:
+            break
+
+    if expected_media_ids:
+        for media_id in expected_media_ids:
+            record = media_map.get(str(media_id))
+            if not record:
+                LOGGER.warning("Aggregation missing media insights", extra={
+                    "post_id": post_id,
+                    "media_id": media_id,
+                    "correlation_id": correlation_id
+                })
+                continue
+            services = record.get("_services", set())
+            missing_required = sorted(REQUIRED_SERVICES - services)
+            missing_optional = sorted(OPTIONAL_SERVICES - services)
+            if missing_required or missing_optional:
+                LOGGER.warning("Aggregation incomplete for media", extra={
+                    "post_id": post_id,
+                    "media_id": media_id,
+                    "missing_required": missing_required,
+                    "missing_optional": missing_optional,
+                    "correlation_id": correlation_id
+                })
+
+    return _finalize_media_map(media_map)
+
 
 # Event type detection patterns
 EVENT_PATTERNS = {
@@ -287,34 +494,32 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
             return
         
         # Parse media insights
-        media_insights = json.loads(media_insights_str) if isinstance(media_insights_str, str) else media_insights_str
+        media_insights = json.loads(media_insights_str) if isinstance(media_insights_str, str) and media_insights_str else media_insights_str
+        if not isinstance(media_insights, list):
+            media_insights = [media_insights] if media_insights else []
 
-        # If not provided in trigger, fetch from insight streams by postId
-        if not media_insights:
-            try:
-                r = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
-                collected: List[Dict[str, Any]] = []
-                for stream in (INSIGHTS_STREAM, FACES_STREAM):
-                    try:
-                        entries = r.xrange(stream, "-", "+", count=500)
-                    except Exception:
-                        continue
-                    for _, values in entries:
-                        post_val = values.get("postId") or values.get("post_id")
-                        if post_val == str(post_id):
-                            collected.append(values)
-                media_insights = collected
-                LOGGER.info("Fetched media insights from streams", extra={
-                    "post_id": post_id,
-                    "num_collected": len(media_insights),
-                    "correlation_id": correlation_id
-                })
-            except Exception as fetch_err:
-                LOGGER.error("Failed to fetch media insights from streams", extra={
-                    "error": str(fetch_err),
-                    "post_id": post_id,
-                    "correlation_id": correlation_id
-                })
+        expected_media_ids = _normalize_media_ids(decoded_data.get("allMediaIds"))
+        total_media_raw = decoded_data.get("totalMedia")
+        try:
+            expected_media_count = int(total_media_raw) if total_media_raw not in (None, "") else None
+        except ValueError:
+            expected_media_count = None
+
+        media_insights = collect_media_insights(
+            post_id=post_id,
+            correlation_id=correlation_id,
+            initial_insights=media_insights,
+            expected_media_ids=expected_media_ids,
+            expected_media_count=expected_media_count,
+        )
+
+        LOGGER.info("Collected media insights", extra={
+            "post_id": post_id,
+            "media_count": len(media_insights),
+            "expected_media_ids": list(expected_media_ids),
+            "expected_media_count": expected_media_count,
+            "correlation_id": correlation_id
+        })
         
         LOGGER.info("Aggregating insights", extra={
             "post_id": post_id,

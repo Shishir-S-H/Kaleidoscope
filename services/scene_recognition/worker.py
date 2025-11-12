@@ -100,9 +100,31 @@ def call_hf_api(image_bytes: bytes, candidate_labels: List[str]) -> List[Dict[st
     # - Our HF Space format: {"results": [{"label": "...", "score": ...}, ...]}
     api_result = response.json()
     
-    # Handle both formats
-    if isinstance(api_result, dict) and "results" in api_result:
-        api_result = api_result["results"]  # Extract list from our Space format
+    # Handle multiple response formats
+    if isinstance(api_result, dict):
+        if "results" in api_result:
+            api_result = api_result["results"]  # HF Space format
+        elif "labels" in api_result and "scores" in api_result:
+            labels = api_result.get("labels") or []
+            scores = api_result.get("scores") or []
+            api_result = [
+                {"label": label, "score": score}
+                for label, score in zip(labels, scores)
+            ]
+        elif "scenes" in api_result and "scores" in api_result:
+            scenes = api_result.get("scenes") or []
+            scores = api_result.get("scores") or []
+            api_result = [
+                {"label": scene, "score": score}
+                for scene, score in zip(scenes, scores)
+            ]
+        else:
+            # Fallback: treat numeric values as scores keyed by scene labels
+            converted = []
+            for key, value in api_result.items():
+                if isinstance(value, (int, float)):
+                    converted.append({"label": key, "score": value})
+            api_result = converted or api_result
     
     LOGGER.debug("Received API response", extra={"result_count": len(api_result) if isinstance(api_result, list) else 1})
     
@@ -132,6 +154,10 @@ def process_scene_recognition(image_bytes: bytes, threshold: float = None) -> Di
         for item in api_result:
             if "label" in item and "score" in item:
                 scores[item["label"]] = item["score"]
+    elif isinstance(api_result, dict):
+        for key, value in api_result.items():
+            if isinstance(value, (int, float)):
+                scores[key] = value
     
     # Log all scores for debugging
     LOGGER.debug("API scene scores received", extra={

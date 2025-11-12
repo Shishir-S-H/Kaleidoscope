@@ -120,8 +120,21 @@ def call_hf_api(image_bytes: bytes) -> Dict[str, Any]:
             if "label" in item and "score" in item:
                 scores[item["label"]] = item["score"]
     elif isinstance(api_result, dict):
-        # Handle case where API returns dict directly
-        LOGGER.warning("API returned dict instead of list", extra={"keys": list(api_result.keys())})
+        tags = api_result.get("tags")
+        tag_scores = api_result.get("scores")
+        if isinstance(tags, list) and isinstance(tag_scores, list):
+            for tag, score in zip(tags, tag_scores):
+                if tag is not None:
+                    scores[tag] = score
+        else:
+            # Fallback: treat dict key/value pairs as label -> score when numeric
+            for key, value in api_result.items():
+                if isinstance(value, (int, float)):
+                    scores[key] = value
+        LOGGER.info("API returned dict response", extra={
+            "keys": list(api_result.keys()),
+            "parsed_scores": len(scores)
+        })
     
     LOGGER.info("Parsed tag scores", extra={
         "scores_count": len(scores),

@@ -38,6 +38,13 @@ MODERATION_LABELS = [
     "violence", "gore"
 ]
 
+# Normalized label groups (lowercase, underscores/spaces ignored)
+def _normalize_label(label: str) -> str:
+    return label.lower().replace("_", " ").strip()
+
+SAFE_LABEL_KEYS = {_normalize_label(label) for label in ["safe", "safe content", "appropriate", "appropriate content"]}
+UNSAFE_LABEL_KEYS = {_normalize_label(label) for label in ["nsfw", "nsfw content", "explicit", "explicit content", "nudity", "violence", "gore"]}
+
 # Redis Streams configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_INPUT = "post-image-processing"
@@ -125,7 +132,9 @@ def moderate_image(image_bytes: bytes) -> Dict[str, Any]:
     api_scores = call_hf_api(image_bytes)
     
     # Calculate safety score using the same logic as the original
-    unsafe_scores = [api_scores.get(label, 0.0) for label in ["nsfw", "nudity", "violence"] if label in api_scores]
+    normalized_scores = {_normalize_label(label): score for label, score in api_scores.items()}
+
+    unsafe_scores = [normalized_scores.get(label, 0.0) for label in UNSAFE_LABEL_KEYS]
     
     # Adjust thresholds for the softmax probability scale
     unsafe_threshold = 0.15
@@ -135,8 +144,7 @@ def moderate_image(image_bytes: bytes) -> Dict[str, Any]:
     has_unsafe = any(score > unsafe_threshold for score in unsafe_scores)
     
     # Check if safe content is detected
-    safe_labels = ["safe", "appropriate"]
-    safe_scores = [api_scores.get(label, 0.0) for label in safe_labels if label in api_scores]
+    safe_scores = [normalized_scores.get(label, 0.0) for label in SAFE_LABEL_KEYS]
     has_safe = any(score > safe_threshold for score in safe_scores)
     
     # Calculate if content is safe
