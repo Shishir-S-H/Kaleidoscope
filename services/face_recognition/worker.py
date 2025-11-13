@@ -205,16 +205,40 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
                 # Publish result to face-detection-results stream
                 # Format faces for backend consumption
                 formatted_faces_list = []
+                EXPECTED_EMBEDDING_DIM = 1024  # Database expects vector(1024)
+                
                 for face in faces_list:
                     # bbox and embedding should be lists/arrays, not JSON strings
                     # They will be serialized when the entire faces list is JSON-encoded
                     bbox = face.get("bbox", [])
                     embedding = face.get("embedding", [])
                     
+                    # FIX: Pad embedding to 1024 dimensions if it's shorter
+                    # Database expects vector(1024) but API may return fewer dimensions
+                    if isinstance(embedding, list):
+                        embedding_len = len(embedding)
+                        if embedding_len < EXPECTED_EMBEDDING_DIM:
+                            # Pad with zeros to reach 1024 dimensions
+                            padding_needed = EXPECTED_EMBEDDING_DIM - embedding_len
+                            embedding = embedding + [0.0] * padding_needed
+                            LOGGER.warning("Padded embedding from {} to {} dimensions", extra={
+                                "original_dim": embedding_len,
+                                "padded_dim": EXPECTED_EMBEDDING_DIM,
+                                "media_id": media_id
+                            })
+                        elif embedding_len > EXPECTED_EMBEDDING_DIM:
+                            # Truncate if longer (shouldn't happen, but handle it)
+                            embedding = embedding[:EXPECTED_EMBEDDING_DIM]
+                            LOGGER.warning("Truncated embedding from {} to {} dimensions", extra={
+                                "original_dim": embedding_len,
+                                "truncated_dim": EXPECTED_EMBEDDING_DIM,
+                                "media_id": media_id
+                            })
+                    
                     formatted_faces_list.append({
                         "faceId": face.get("face_id", str(uuid.uuid4())),
                         "bbox": bbox,  # Keep as list, will be JSON-encoded with faces list
-                        "embedding": embedding,  # Keep as list, will be JSON-encoded with faces list
+                        "embedding": embedding,  # Now padded to 1024 dimensions
                         "confidence": face.get("confidence", 0.0)  # Keep as number
                     })
                 
