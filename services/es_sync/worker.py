@@ -114,7 +114,12 @@ class ElasticsearchSyncHandler:
                 port=DB_PORT,
                 database=DB_NAME,
                 user=DB_USER,
-                password=DB_PASSWORD
+                password=DB_PASSWORD,
+                connect_timeout=10,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5
             )
             self.logger.info("Connected to PostgreSQL", extra={
                 "host": DB_HOST,
@@ -132,9 +137,59 @@ class ElasticsearchSyncHandler:
             })
             self.pg_conn = None
     
+    def _ensure_postgresql_connection(self) -> bool:
+        """
+        Ensure PostgreSQL connection is alive and reconnect if needed.
+        
+        Returns:
+            True if connection is available, False otherwise
+        """
+        import psycopg2
+        
+        # Check if connection exists and is alive
+        if self.pg_conn is None:
+            self.logger.warning("PostgreSQL connection is None, attempting to reconnect...")
+            self._init_postgresql()
+            return self.pg_conn is not None
+        
+        # Check connection status
+        try:
+            # Try to execute a simple query to check if connection is alive
+            with self.pg_conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            return True
+        except (psycopg2.InterfaceError, psycopg2.OperationalError, psycopg2.DatabaseError) as e:
+            # Connection is dead, attempt to reconnect
+            self.logger.warning(f"PostgreSQL connection is dead: {e}. Attempting to reconnect...", extra={
+                "error_type": type(e).__name__
+            })
+            try:
+                # Close the old connection if it exists
+                if self.pg_conn:
+                    try:
+                        self.pg_conn.close()
+                    except:
+                        pass
+                # Reconnect
+                self._init_postgresql()
+                return self.pg_conn is not None
+            except Exception as reconnect_error:
+                self.logger.error(f"Failed to reconnect to PostgreSQL: {reconnect_error}", extra={
+                    "host": DB_HOST,
+                    "port": DB_PORT,
+                    "database": DB_NAME
+                })
+                return False
+        except Exception as e:
+            # Unexpected error, log and return False
+            self.logger.error(f"Unexpected error checking PostgreSQL connection: {e}")
+            return False
+    
     def read_from_postgresql(self, table_name: str, document_id: str) -> Optional[Dict[str, Any]]:
         """
         Read data from PostgreSQL read model table.
+        Automatically handles connection health checking and reconnection.
         
         Args:
             table_name: Name of the read model table
@@ -143,13 +198,15 @@ class ElasticsearchSyncHandler:
         Returns:
             Dictionary with row data or None if not found
         """
-        if not self.pg_conn:
-            self.logger.error("PostgreSQL connection not available")
+        import psycopg2
+        import psycopg2.extras
+        
+        # Ensure connection is alive before use
+        if not self._ensure_postgresql_connection():
+            self.logger.error("PostgreSQL connection not available after reconnection attempt")
             return None
         
         try:
-            import psycopg2.extras
-            
             # Determine primary key column name based on table
             pk_column = self._get_primary_key_column(table_name)
             
@@ -173,6 +230,50 @@ class ElasticsearchSyncHandler:
                         "document_id": document_id
                     })
                     return None
+                    
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            # Connection error - attempt one retry with reconnection
+            self.logger.warning(f"Connection error during read, attempting reconnection: {e}", extra={
+                "table": table_name,
+                "document_id": document_id,
+                "error_type": type(e).__name__
+            })
+            
+            # Try to reconnect and retry once
+            if self._ensure_postgresql_connection():
+                try:
+                    with self.pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                        pk_column = self._get_primary_key_column(table_name)
+                        query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s'
+                        cursor.execute(query, (document_id,))
+                        row = cursor.fetchone()
+                        
+                        if row:
+                            data = dict(row)
+                            self.logger.info("Read data from PostgreSQL (after reconnection)", extra={
+                                "table": table_name,
+                                "document_id": document_id,
+                                "columns": list(data.keys())
+                            })
+                            return data
+                        else:
+                            self.logger.warning("Document not found in PostgreSQL (after reconnection)", extra={
+                                "table": table_name,
+                                "document_id": document_id
+                            })
+                            return None
+                except Exception as retry_error:
+                    self.logger.error(f"Error reading from PostgreSQL after reconnection: {retry_error}", extra={
+                        "table": table_name,
+                        "document_id": document_id
+                    })
+                    return None
+            else:
+                self.logger.error("Failed to reconnect to PostgreSQL", extra={
+                    "table": table_name,
+                    "document_id": document_id
+                })
+                return None
                     
         except Exception as e:
             self.logger.exception("Error reading from PostgreSQL", extra={
