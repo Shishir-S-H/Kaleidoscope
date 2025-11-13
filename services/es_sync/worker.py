@@ -470,6 +470,23 @@ def map_postgresql_to_elasticsearch(table_name: str, pg_data: Dict[str, Any]) ->
         # Handle array fields (PostgreSQL arrays)
         if isinstance(value, list):
             es_doc[es_key] = value
+        # Handle bbox field - PostgreSQL integer array, needs to be parsed if string
+        elif key == "bbox" and value is not None:
+            if isinstance(value, list):
+                # Already a list, ensure integers
+                es_doc[es_key] = [int(x) for x in value if x is not None]
+            elif isinstance(value, str):
+                # Parse JSON string like "[941,181,184,184]"
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, list):
+                        es_doc[es_key] = [int(x) for x in parsed if x is not None]
+                    else:
+                        es_doc[es_key] = value
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    es_doc[es_key] = value
+            else:
+                es_doc[es_key] = value
         # Handle timestamp fields - convert to ISO8601 (Elasticsearch expects RFC 3339)
         elif key in {"created_at", "updated_at", "last_modified_at", "processed_at"} and value:
             es_doc[es_key] = _normalize_timestamp(value)
