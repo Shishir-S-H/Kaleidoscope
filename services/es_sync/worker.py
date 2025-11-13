@@ -210,8 +210,14 @@ class ElasticsearchSyncHandler:
             # Determine primary key column name based on table
             pk_column = self._get_primary_key_column(table_name)
             
-            with self.pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            # For VARCHAR primary keys (like face_id), cast document_id to text
+            # This prevents "operator does not exist: character varying = integer" errors
+            if table_name == "read_model_face_search" and pk_column == "face_id":
+                query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s::text'
+            else:
                 query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s'
+            
+            with self.pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                 cursor.execute(query, (document_id,))
                 row = cursor.fetchone()
                 
@@ -244,7 +250,11 @@ class ElasticsearchSyncHandler:
                 try:
                     with self.pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                         pk_column = self._get_primary_key_column(table_name)
-                        query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s'
+                        # For VARCHAR primary keys (like face_id), cast document_id to text
+                        if table_name == "read_model_face_search" and pk_column == "face_id":
+                            query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s::text'
+                        else:
+                            query = f'SELECT * FROM {table_name} WHERE {pk_column} = %s'
                         cursor.execute(query, (document_id,))
                         row = cursor.fetchone()
                         
