@@ -21,5 +21,3 @@
 ## 🔗 Related Documentation
 
 - **Backend Integration**: [../backend-integration/](../backend-integration/)
-- **Testing**: [../testing/](../testing/)
-

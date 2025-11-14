@@ -4,8 +4,9 @@
 
 ---
 
-## 📚 Resources
+## 📚 Documentation Files
 
+- **[API.md](API.md)** - Complete API reference and message formats
 - **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection for API testing
 
 ---
@@ -34,5 +35,4 @@ The Postman collection includes:
 
 ## 🔗 Related Documentation
 
-- **Testing**: [../testing/](../testing/)
 - **Backend Integration**: [../backend-integration/](../backend-integration/)

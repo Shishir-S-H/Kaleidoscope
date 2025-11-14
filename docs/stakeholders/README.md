@@ -32,5 +32,5 @@ This section contains documentation designed for:
 
 ## 🔗 Related Documentation
 
-- **Technical Details**: [../END_TO_END_PROJECT_DOCUMENTATION.md](../END_TO_END_PROJECT_DOCUMENTATION.md)
-- **Architecture**: [../architecture/](../architecture/)
+- **Architecture**: [../ARCHITECTURE.md](../ARCHITECTURE.md)
+- **Getting Started**: [../GETTING_STARTED.md](../GETTING_STARTED.md)

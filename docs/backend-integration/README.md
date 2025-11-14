@@ -10,9 +10,8 @@
 
 | Document                                                                           | Purpose                        | When to Use                                           |
 | ---------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------- |
-| **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** | Complete integration reference | **Start here** - Comprehensive guide with all details |
-| **[INTEGRATION_WALKTHROUGH.md](INTEGRATION_WALKTHROUGH.md)**                       | Step-by-step tutorial          | Follow along during implementation                    |
-| **[INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md)**                               | High-level overview            | Quick architecture overview                           |
+| **[BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md)**                                   | High-level integration guide   | **Start here** - Overview and integration points     |
+| **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)** | Complete integration reference | Detailed guide with SQL and code examples            |
 | **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)**                   | Requirements specification     | Reference for exact requirements                      |
 | **[MESSAGE_FORMATS.md](MESSAGE_FORMATS.md)**                                       | Message format specs           | Reference for Redis Stream messages                   |
 | **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)**                                       | Database schema                | Reference for PostgreSQL tables                       |
@@ -24,8 +23,8 @@
 
 ## 🚀 Quick Start
 
-1. **Read**: [BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md) - Complete overview
-2. **Follow**: [INTEGRATION_WALKTHROUGH.md](INTEGRATION_WALKTHROUGH.md) - Step-by-step implementation
+1. **Read**: [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md) - High-level overview
+2. **Follow**: [BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md) - Step-by-step implementation
 3. **Reference**: Other documents as needed during implementation
 
 ---
@@ -46,4 +45,3 @@
 
 - **Deployment**: [../deployment/BACKEND_DEPLOYMENT_GUIDE.md](../deployment/BACKEND_DEPLOYMENT_GUIDE.md)
 - **Environment Variables**: [../deployment/BACKEND_ENV_VARIABLES.md](../deployment/BACKEND_ENV_VARIABLES.md)
-- **Testing**: [../testing/README_TESTING_AND_DOCS.md](../testing/README_TESTING_AND_DOCS.md)

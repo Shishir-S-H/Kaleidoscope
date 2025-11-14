@@ -147,11 +147,14 @@ curl http://localhost:9200
 # Optional health endpoints vary by service; prefer stream tests below
 ```
 
-### Run the Comprehensive Test Script (added to repo)
+### Verify Services
 
 ```bash
-chmod +x comprehensive-test.sh
-./comprehensive-test.sh
+# Check all services are running
+docker compose ps
+
+# Check service logs
+docker compose logs [service_name]
 ```
 
 ## Step 7: Configure Firewall

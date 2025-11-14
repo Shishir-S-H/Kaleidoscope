@@ -277,10 +277,10 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ```java
 @Service
 public class ImageProcessingService {
-    
+
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
-    
+
     public void publishImageProcessingJob(Long postId, Long mediaId, String imageUrl, Long userId) {
         Map<String, Object> jobData = new HashMap<>();
         jobData.put("job_id", UUID.randomUUID().toString());
@@ -289,7 +289,7 @@ public class ImageProcessingService {
         jobData.put("image_url", imageUrl);
         jobData.put("user_id", userId);
         jobData.put("timestamp", Instant.now().toString());
-        
+
         redisTemplate.opsForStream().add("post-image-processing", jobData);
     }
 }
@@ -332,25 +332,25 @@ public class ImageProcessingService {
 ```java
 @Component
 public class AIResultsConsumer {
-    
+
     @Autowired
     private MediaAiInsightsService mediaAiInsightsService;
-    
+
     @StreamListener("ml-insights-results")
     public void handleAIResults(Map<String, Object> message) {
         String jobId = (String) message.get("job_id");
         Long mediaId = Long.valueOf(message.get("media_id").toString());
         Long postId = Long.valueOf(message.get("post_id").toString());
-        
+
         @SuppressWarnings("unchecked")
         Map<String, Object> aiInsights = (Map<String, Object>) message.get("ai_insights");
-        
+
         // Update your core MediaAiInsights table
         mediaAiInsightsService.updateAIInsights(mediaId, aiInsights);
-        
+
         // Update read model table
         updateMediaSearchReadModel(mediaId, postId, aiInsights);
-        
+
         // Trigger Elasticsearch sync
         triggerElasticsearchSync("media_search", mediaId);
     }
@@ -443,31 +443,33 @@ public class AIResultsConsumer {
 ### Phase 1: Database Setup (Week 1)
 
 1. **Create Read Model Tables**
+
    ```sql
    -- Run all CREATE TABLE statements above
    -- Enable pgvector extension
    ```
 
 2. **Create JPA Entities**
+
    ```java
    @Entity
    @Table(name = "media_search_read_model")
    public class MediaSearchReadModel {
        @Id
        private Long mediaId;
-       
+
        @Column(name = "post_id")
        private Long postId;
-       
+
        @Column(name = "ai_caption")
        private String aiCaption;
-       
+
        @Column(name = "ai_tags", columnDefinition = "text[]")
        private String[] aiTags;
-       
+
        @Column(name = "image_embedding", columnDefinition = "vector(512)")
        private float[] imageEmbedding;
-       
+
        // ... other fields
    }
    ```
@@ -475,6 +477,7 @@ public class AIResultsConsumer {
 ### Phase 2: Redis Streams Integration (Week 2)
 
 1. **Add Redis Streams Dependencies**
+
    ```xml
    <dependency>
        <groupId>org.springframework.boot</groupId>
@@ -483,6 +486,7 @@ public class AIResultsConsumer {
    ```
 
 2. **Configure Redis Streams**
+
    ```yaml
    spring:
      redis:
@@ -504,11 +508,13 @@ public class AIResultsConsumer {
 ### Phase 3: Business Logic (Week 3)
 
 1. **Update Read Models**
+
    - When AI results arrive
    - When post aggregation completes
    - When user data changes
 
 2. **Trigger Elasticsearch Sync**
+
    - After read model updates
    - Batch processing for efficiency
 
@@ -520,11 +526,12 @@ public class AIResultsConsumer {
 ### Phase 4: API Endpoints (Week 4)
 
 1. **Search APIs**
+
    ```java
    @RestController
    @RequestMapping("/api/search")
    public class SearchController {
-       
+
        @GetMapping("/media")
        public ResponseEntity<SearchResult> searchMedia(
            @RequestParam String query,
@@ -532,14 +539,14 @@ public class AIResultsConsumer {
            @RequestParam(defaultValue = "20") int size) {
            // Query Elasticsearch media_search index
        }
-       
+
        @GetMapping("/posts")
        public ResponseEntity<SearchResult> searchPosts(
            @RequestParam String query,
            @RequestParam(required = false) String eventType) {
            // Query Elasticsearch post_search index
        }
-       
+
        @GetMapping("/users")
        public ResponseEntity<SearchResult> searchUsers(
            @RequestParam String query,
@@ -550,6 +557,7 @@ public class AIResultsConsumer {
    ```
 
 2. **Recommendation APIs**
+
    ```java
    @GetMapping("/recommendations/{userId}")
    public ResponseEntity<List<Recommendation>> getRecommendations(
@@ -575,6 +583,7 @@ public class AIResultsConsumer {
 ### Test Data Setup
 
 1. **Create Test Users**
+
    ```sql
    INSERT INTO users (username, email, full_name, department) VALUES
    ('alice', 'alice@company.com', 'Alice Smith', 'Engineering'),
@@ -582,6 +591,7 @@ public class AIResultsConsumer {
    ```
 
 2. **Create Test Posts**
+
    ```sql
    INSERT INTO posts (user_id, title, description) VALUES
    (1, 'Team Outing', 'Great day at the beach'),
@@ -595,34 +605,36 @@ public class AIResultsConsumer {
 ### Integration Testing
 
 1. **End-to-End Flow Test**
+
    ```java
    @Test
    public void testCompleteImageProcessingFlow() {
        // 1. Upload image
        Long mediaId = uploadTestImage();
-       
+
        // 2. Verify AI processing
-       await().atMost(30, SECONDS).until(() -> 
+       await().atMost(30, SECONDS).until(() ->
            mediaAiInsightsService.hasAIInsights(mediaId));
-       
+
        // 3. Verify read model update
        assertThat(mediaSearchReadModelRepository.findById(mediaId))
            .isPresent();
-       
+
        // 4. Verify Elasticsearch sync
-       await().atMost(10, SECONDS).until(() -> 
+       await().atMost(10, SECONDS).until(() ->
            elasticsearchService.documentExists("media_search", "media_" + mediaId));
    }
    ```
 
 2. **Search Functionality Test**
+
    ```java
    @Test
    public void testSearchFunctionality() {
        // Search for media
        SearchResult result = searchService.searchMedia("beach", 0, 10);
        assertThat(result.getHits()).isNotEmpty();
-       
+
        // Search for posts
        SearchResult posts = searchService.searchPosts("team", null);
        assertThat(posts.getHits()).isNotEmpty();
@@ -636,11 +648,13 @@ public class AIResultsConsumer {
 ### Key Metrics to Track
 
 1. **Processing Metrics**
+
    - Images processed per minute
    - AI processing latency
    - Error rates by service
 
 2. **Search Metrics**
+
    - Search query latency
    - Search result relevance
    - Popular search terms
@@ -656,18 +670,18 @@ public class AIResultsConsumer {
 @Slf4j
 @Service
 public class ImageProcessingService {
-    
+
     public void publishImageProcessingJob(Long postId, Long mediaId, String imageUrl, Long userId) {
-        log.info("Publishing image processing job: postId={}, mediaId={}, userId={}", 
+        log.info("Publishing image processing job: postId={}, mediaId={}, userId={}",
                  postId, mediaId, userId);
-        
+
         try {
             // Publish to Redis Stream
             redisTemplate.opsForStream().add("post-image-processing", jobData);
-            
+
             log.info("Successfully published image processing job: jobId={}", jobId);
         } catch (Exception e) {
-            log.error("Failed to publish image processing job: postId={}, error={}", 
+            log.error("Failed to publish image processing job: postId={}, error={}",
                      postId, e.getMessage(), e);
             throw e;
         }
@@ -689,7 +703,7 @@ spring:
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD}
     ssl: true
-  
+
   datasource:
     url: jdbc:postgresql://${DB_HOST:postgres-cluster.company.com}:5432/kaleidoscope
     username: ${DB_USERNAME}
@@ -709,11 +723,13 @@ elasticsearch:
 ### Security Considerations
 
 1. **Redis Security**
+
    - Enable authentication
    - Use TLS encryption
    - Network isolation
 
 2. **Database Security**
+
    - Connection encryption
    - Role-based access
    - Audit logging
@@ -729,14 +745,12 @@ elasticsearch:
 
 ### Documentation References
 
-- **[COMPLETE_DATABASE_SCHEMA.md](COMPLETE_DATABASE_SCHEMA.md)** - Full database schema
-- **[SIMPLIFIED_READ_MODELS_FOR_BACKEND.md](SIMPLIFIED_READ_MODELS_FOR_BACKEND.md)** - Read model implementation
+- **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Full database schema
+- **[READ_MODELS.md](READ_MODELS.md)** - Read model implementation
 - **[POST_AGGREGATION_EXPLAINED.md](POST_AGGREGATION_EXPLAINED.md)** - Post aggregation strategy
-- **[CURL_COMMANDS_REFERENCE.md](CURL_COMMANDS_REFERENCE.md)** - API testing commands
 
 ### Testing Resources
 
-- **[MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)** - Step-by-step testing
 - **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)** - Postman collection
 
 ### Contact Information
@@ -750,12 +764,14 @@ elasticsearch:
 ## ✅ Checklist for Backend Team
 
 ### Week 1: Database Setup
+
 - [ ] Create 7 read model tables
 - [ ] Enable pgvector extension
 - [ ] Create JPA entities
 - [ ] Set up database migrations
 
 ### Week 2: Redis Integration
+
 - [ ] Add Redis Streams dependencies
 - [ ] Configure Redis connection
 - [ ] Implement image processing publisher
@@ -763,6 +779,7 @@ elasticsearch:
 - [ ] Implement face detection consumer
 
 ### Week 3: Business Logic
+
 - [ ] Update read models on AI results
 - [ ] Implement post aggregation trigger
 - [ ] Implement enriched insights consumer
@@ -770,6 +787,7 @@ elasticsearch:
 - [ ] Add error handling and retries
 
 ### Week 4: API Development
+
 - [ ] Implement search APIs
 - [ ] Implement recommendation APIs
 - [ ] Implement face recognition APIs
@@ -777,6 +795,7 @@ elasticsearch:
 - [ ] Performance optimization
 
 ### Week 5: Production Ready
+
 - [ ] Security review
 - [ ] Performance testing
 - [ ] Monitoring setup

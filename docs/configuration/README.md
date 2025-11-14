@@ -6,6 +6,7 @@
 
 ## 📚 Documentation Files
 
+- **[CONFIGURATION.md](CONFIGURATION.md)** - Complete configuration guide
 - **[ENV_FILE_EXAMPLE.md](ENV_FILE_EXAMPLE.md)** - Environment variables example and reference
 - **[SECURITY_SETUP.md](SECURITY_SETUP.md)** - Security configuration guide
 

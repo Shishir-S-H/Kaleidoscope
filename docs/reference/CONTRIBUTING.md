@@ -14,36 +14,40 @@ Thank you for your interest in contributing to Kaleidoscope AI! This document pr
 ### Development Setup
 
 1. **Fork and Clone**
+
    ```bash
    git clone https://github.com/yourusername/kaleidoscope-ai.git
    cd kaleidoscope-ai
    ```
 
 2. **Environment Setup**
+
    ```bash
    # Copy environment template
    cp .env.example .env
-   
+
    # Edit .env with your HuggingFace API token
    # Get token from: https://huggingface.co/settings/tokens
    ```
 
 3. **Start Development Environment**
+
    ```bash
    # Start all services
    docker compose up -d
-   
+
    # Verify services are running
    docker compose ps
    ```
 
-4. **Run Tests**
+4. **Verify Services**
+
    ```bash
-   # Automated tests
-   python tests/test_end_to_end.py
-   
-   # Manual testing
-   # Follow docs/testing/MANUAL_TESTING_GUIDE.md
+   # Check services are running
+   docker compose ps
+
+   # Check service logs
+   docker compose logs [service_name]
    ```
 
 ## 📝 How to Contribute
@@ -71,25 +75,29 @@ Thank you for your interest in contributing to Kaleidoscope AI! This document pr
 ### Code Contributions
 
 1. **Create a Feature Branch**
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
 
 2. **Make Your Changes**
+
    - Follow existing code style
    - Add tests for new functionality
    - Update documentation as needed
 
-3. **Test Your Changes**
+3. **Verify Your Changes**
+
    ```bash
-   # Run all tests
-   python tests/test_end_to_end.py
-   
-   # Test specific service
+   # Check services are running
+   docker compose ps
+
+   # Check service logs
    docker compose logs service_name
    ```
 
 4. **Commit Your Changes**
+
    ```bash
    git add .
    git commit -m "Add: brief description of changes"
@@ -118,25 +126,14 @@ kaleidoscope-ai/
 └── es_mappings/             # Elasticsearch index definitions
 ```
 
-## 🧪 Testing Guidelines
+## 🧪 Verification Guidelines
 
-### Automated Testing
+### Service Verification
 
-- All new features must include tests
-- Run `python tests/test_end_to_end.py` before submitting
-- Ensure all tests pass (currently 14 tests, 100% pass rate)
-
-### Manual Testing
-
-- Test with real images using the manual testing guide
+- Verify services start correctly after changes
+- Check service logs for errors
 - Verify Redis Streams message flow
 - Check Elasticsearch indexing and search
-
-### Test Data
-
-- Use the provided test images in `tests/test_images/`
-- Test with various image types (photos, graphics, documents)
-- Test edge cases (very large images, unusual formats)
 
 ## 📚 Documentation
 
@@ -225,15 +222,16 @@ kaleidoscope-ai/
 
 ### PR Requirements
 
-- [ ] All tests pass
 - [ ] Code follows project style guidelines
 - [ ] Documentation updated as needed
 - [ ] Changes are backwards compatible
+- [ ] Services start and run correctly
 - [ ] PR description explains the changes
 
 ## 🎉 Recognition
 
 Contributors will be recognized in:
+
 - CONTRIBUTORS.md file
 - Release notes
 - Project documentation

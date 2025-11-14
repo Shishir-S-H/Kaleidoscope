@@ -417,21 +417,16 @@
 
 **For Developers**:
 
-- **[END_TO_END_PROJECT_DOCUMENTATION.md](END_TO_END_PROJECT_DOCUMENTATION.md)**: Complete system documentation
-- **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)**: Codebase organization
-- **[MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)**: Testing procedures
+- **[ARCHITECTURE.md](../ARCHITECTURE.md)**: Complete system architecture
+- **[REPOSITORY_STRUCTURE.md](../REPOSITORY_STRUCTURE.md)**: Codebase organization
 
 **For Backend Team**:
 
-- **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](BACKEND_INTEGRATION_COMPLETE_GUIDE.md)**: Complete integration guide
-- **[COMPLETE_DATABASE_SCHEMA.md](COMPLETE_DATABASE_SCHEMA.md)**: Database specifications
-- **[BACKEND_TEAM_REQUIREMENTS.md](BACKEND_TEAM_REQUIREMENTS.md)**: Technical requirements
+- **[BACKEND_INTEGRATION_COMPLETE_GUIDE.md](../backend-integration/BACKEND_INTEGRATION_COMPLETE_GUIDE.md)**: Complete integration guide
+- **[DATABASE_SCHEMA.md](../backend-integration/DATABASE_SCHEMA.md)**: Database specifications
+- **[BACKEND_TEAM_REQUIREMENTS.md](../backend-integration/BACKEND_TEAM_REQUIREMENTS.md)**: Technical requirements
 
-**For Testing & QA**:
-
-- **[TESTING_DOCUMENTATION_SUMMARY.md](TESTING_DOCUMENTATION_SUMMARY.md)**: Testing overview
-- **[CURL_COMMANDS_REFERENCE.md](CURL_COMMANDS_REFERENCE.md)**: API testing commands
-- **[Kaleidoscope_AI_API_Tests.postman_collection.json](Kaleidoscope_AI_API_Tests.postman_collection.json)**: Postman collection
+- **[Kaleidoscope_AI_API_Tests.postman_collection.json](../api/Kaleidoscope_AI_API_Tests.postman_collection.json)**: Postman collection
 
 ### Quick Start Resources
 
@@ -440,7 +435,9 @@
 ```bash
 cd kaleidoscope-ai
 docker compose up -d
-python tests/test_end_to_end.py
+
+# Verify services are running
+docker compose ps
 ```
 
 **Integration Testing**:
@@ -516,7 +513,7 @@ curl "http://localhost:9200/media_search/_search?q=beach"
 
 **Technical Questions**: Review comprehensive documentation in `docs/` folder  
 **Integration Support**: Use `BACKEND_INTEGRATION_COMPLETE_GUIDE.md`  
-**Testing Issues**: Follow `MANUAL_TESTING_GUIDE.md`  
+**Testing Issues**: See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)  
 **Emergency Support**: [Your Contact Information]
 
 ---

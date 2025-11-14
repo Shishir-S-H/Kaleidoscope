@@ -139,10 +139,11 @@ Example:
 
 All scripts use these default values (can be modified in scripts):
 
-- **SSH Host**: `root@project-kaleidoscope.tech`
-- **Remote Directory**: `~/kaleidoscope`
+- **SSH Host**: `root@165.232.179.167`
+- **Remote Directory**: `~/Kaleidoscope` (note: capital K)
 - **Backend Registry**: `ajayprabhu2004`
 - **AI Services Registry**: `shishir01`
+- **Domain**: `project-kaleidoscope.tech`
 
 ---
 
@@ -168,7 +169,7 @@ If image pull fails:
 1. Check logs:
 
    ```bash
-   ssh root@project-kaleidoscope.tech 'cd ~/kaleidoscope && docker-compose -f docker-compose.prod.yml logs'
+   ssh root@165.232.179.167 'cd ~/Kaleidoscope && docker-compose -f docker-compose.prod.yml logs'
    ```
 
 2. Verify `.env` file exists and is correct

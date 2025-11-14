@@ -6,7 +6,8 @@
 
 ## 📚 Documentation Files
 
-- **[ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Complete Elasticsearch setup and configuration guide
+- **[ELASTICSEARCH.md](ELASTICSEARCH.md)** - Complete Elasticsearch guide
+- **[ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md)** - Detailed Elasticsearch setup and configuration guide
 
 ---
 
@@ -27,7 +28,7 @@ The system uses 7 specialized Elasticsearch indices:
 ## 🚀 Quick Start
 
 1. **Read**: [ELASTICSEARCH_COMPLETE_SUMMARY.md](ELASTICSEARCH_COMPLETE_SUMMARY.md) - Complete setup guide
-2. **Setup**: Use [../../scripts/setup_es_indices.py](../../scripts/setup_es_indices.py) to create indices
+2. **Setup**: Use [../../scripts/setup/setup_es_indices.py](../../scripts/setup/setup_es_indices.py) to create indices
 3. **Verify**: Check indices with `curl http://localhost:9200/_cat/indices?v`
 
 ---

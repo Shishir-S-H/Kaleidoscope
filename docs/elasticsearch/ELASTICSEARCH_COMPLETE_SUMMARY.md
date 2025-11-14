@@ -281,7 +281,7 @@ docker compose logs -f es_sync
 - `kaleidoscope-ai/docker-compose.yml` - Uncommented Elasticsearch and ES Sync
 - `kaleidoscope-ai/es_mappings/*.json` - Removed invalid `knn` setting (4 files)
 - `kaleidoscope-ai/services/es_sync/requirements.txt` - Pinned ES client version
-- `kaleidoscope-ai/scripts/setup_es_indices.py` - Removed emojis for Windows
+- `kaleidoscope-ai/scripts/setup/setup_es_indices.py` - Elasticsearch index setup script
 
 ---
 
