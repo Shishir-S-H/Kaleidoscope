@@ -44,6 +44,7 @@ class HFModerationProvider(BaseModerationProvider):
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
         self._use_inference_first = is_model_id(self._api_url)
+        self._inference_disabled = False
         self._space_fallback_url: str = os.getenv(
             "HF_MODERATION_SPACE_URL", DEFAULT_SPACE_URL
         )
@@ -61,16 +62,22 @@ class HFModerationProvider(BaseModerationProvider):
     # ------------------------------------------------------------------
 
     def _call_api(self, image_bytes: bytes) -> Dict[str, float]:
-        """Try Inference first when model ID is set; else use Space. On Inference failure, fall back to Space."""
-        if self._use_inference_first:
+        """Try Inference first; fall back to Space only on permanent failures."""
+        if self._use_inference_first and not self._inference_disabled:
             try:
                 return self._call_inference_client(image_bytes)
-            except Exception as e:
+            except StopIteration:
                 logger.warning(
-                    "Moderation Inference failed, falling back to Space: %s", e,
-                    exc_info=False,
+                    "Moderation: no Inference Provider for this model; "
+                    "permanently switching to Space fallback",
                 )
+                self._inference_disabled = True
                 return self._call_spaces_api(image_bytes, self._space_fallback_url)
+            except Exception as e:
+                logger.warning("Moderation Inference error, falling back to Space: %s", e)
+                return self._call_spaces_api(image_bytes, self._space_fallback_url)
+        if self._use_inference_first:
+            return self._call_spaces_api(image_bytes, self._space_fallback_url)
         return self._call_spaces_api(image_bytes, self._api_url)
 
     def _call_inference_client(self, image_bytes: bytes) -> Dict[str, float]:

@@ -44,6 +44,7 @@ class HFSceneProvider(BaseSceneProvider):
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
         self._use_inference_first = is_model_id(self._api_url)
+        self._inference_disabled = False
         self._space_fallback_url: str = os.getenv(
             "HF_SCENE_SPACE_URL", DEFAULT_SPACE_URL
         )
@@ -70,18 +71,28 @@ class HFSceneProvider(BaseSceneProvider):
     def _call_api(
         self, image_bytes: bytes, candidate_labels: List[str],
     ) -> List[Dict[str, Any]]:
-        """Try Inference first when model ID is set; else use Space. On Inference failure, fall back to Space."""
-        if self._use_inference_first:
+        """Try Inference first; fall back to Space only on permanent failures."""
+        if self._use_inference_first and not self._inference_disabled:
             try:
                 return self._call_inference_client(image_bytes, candidate_labels)
-            except Exception as e:
+            except StopIteration:
                 logger.warning(
-                    "Scene Inference failed, falling back to Space: %s", e,
-                    exc_info=False,
+                    "Scene: no Inference Provider for this model; "
+                    "permanently switching to Space fallback",
                 )
+                self._inference_disabled = True
                 return self._call_spaces_api(
                     image_bytes, candidate_labels, self._space_fallback_url,
                 )
+            except Exception as e:
+                logger.warning("Scene Inference error, falling back to Space: %s", e)
+                return self._call_spaces_api(
+                    image_bytes, candidate_labels, self._space_fallback_url,
+                )
+        if self._use_inference_first:
+            return self._call_spaces_api(
+                image_bytes, candidate_labels, self._space_fallback_url,
+            )
         return self._call_spaces_api(image_bytes, candidate_labels, self._api_url)
 
     def _call_inference_client(
@@ -159,9 +170,10 @@ class HFSceneProvider(BaseSceneProvider):
         self,
         image_bytes: bytes,
         labels: list[str] | None = None,
-        threshold: float = 0.005,
+        threshold: float = 0.05,
+        top_n: int = 5,
     ) -> SceneResult:
-        """Return the best-matching scene label for an image."""
+        """Return the top-N scene labels for an image."""
         candidate_labels = labels if labels else self._scene_labels
         api_result = self._call_api(image_bytes, candidate_labels)
 
@@ -171,25 +183,21 @@ class HFSceneProvider(BaseSceneProvider):
                 if "label" in item and "score" in item:
                     scores[item["label"]] = float(item["score"])
 
-        filtered = {s: sc for s, sc in scores.items() if sc > threshold}
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-        if scores:
-            sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        if sorted_scores:
             best_scene = sorted_scores[0][0]
             best_score = sorted_scores[0][1]
         else:
             best_scene = "unknown"
             best_score = 0.0
 
-        if not filtered and scores:
-            top = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
-            filtered = dict(top)
-            logger.info(
-                "No scenes above threshold=%.4f; returning top-3 anyway", threshold,
-            )
+        top_scores = {k: v for k, v in sorted_scores[:top_n] if v >= threshold}
+        if not top_scores and sorted_scores:
+            top_scores = dict(sorted_scores[:3])
 
         return SceneResult(
             scene=best_scene,
             confidence=round(best_score, 4),
-            scores={k: round(v, 4) for k, v in filtered.items()},
+            scores={k: round(v, 4) for k, v in top_scores.items()},
         )
