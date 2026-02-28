@@ -41,7 +41,7 @@ class TestModerationInferenceProviders:
             "Falconsai/nsfw_image_detection",
         )
         provider = get_provider("moderation")
-        assert provider._use_inference_client is True
+        assert provider._use_inference_first is True
 
     def test_uses_spaces_path(self, monkeypatch):
         monkeypatch.setenv(
@@ -49,7 +49,7 @@ class TestModerationInferenceProviders:
             "https://my-space.hf.space/classify",
         )
         provider = get_provider("moderation")
-        assert provider._use_inference_client is False
+        assert provider._use_inference_first is False
 
     @patch("shared.providers.huggingface.moderation.inference_client_image_classification")
     def test_inference_client_call(self, mock_inference, monkeypatch):

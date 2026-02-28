@@ -1,8 +1,7 @@
 """HuggingFace scene-recognition provider.
 
-Supports:
-- InferenceClient (model ID) - new Inference Providers API
-- HF Spaces (URL)
+Uses Inference API first (model ID), falls back to HF Space URL if Inference fails.
+If configured with a URL only, uses Space only.
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ from shared.utils.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SPACE_URL = "https://phantomfury-kaleidoscope-scene-recognition.hf.space/recognize"
+
 DEFAULT_SCENE_LABELS: List[str] = [
     "beach", "mountains", "urban", "office", "restaurant", "forest",
     "desert", "lake", "park", "indoor", "outdoor", "rural",
@@ -34,7 +35,7 @@ _DEFAULT_THRESHOLD = 0.005
 
 
 class HFSceneProvider(BaseSceneProvider):
-    """Scene recognition via InferenceClient or HF Spaces."""
+    """Scene recognition: Inference first, then fallback to HF Space."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -42,7 +43,10 @@ class HFSceneProvider(BaseSceneProvider):
         )
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
-        self._use_inference_client = is_model_id(self._api_url)
+        self._use_inference_first = is_model_id(self._api_url)
+        self._space_fallback_url: str = os.getenv(
+            "HF_SCENE_SPACE_URL", DEFAULT_SPACE_URL
+        )
 
         raw_labels = os.getenv("SCENE_LABELS", "")
         self._scene_labels: List[str] = (
@@ -54,7 +58,7 @@ class HFSceneProvider(BaseSceneProvider):
         if not self._api_url:
             logger.warning("HF_SCENE_API_URL / HF_API_URL not configured")
         else:
-            mode = "Inference Providers" if self._use_inference_client else "HF Space"
+            mode = "Inference first (fallback Space)" if self._use_inference_first else "HF Space"
             logger.info("Scene provider using %s: %s", mode, self._api_url)
 
     @property
@@ -66,10 +70,19 @@ class HFSceneProvider(BaseSceneProvider):
     def _call_api(
         self, image_bytes: bytes, candidate_labels: List[str],
     ) -> List[Dict[str, Any]]:
-        """POST the image and return a list of ``{label, score}`` dicts."""
-        if self._use_inference_client:
-            return self._call_inference_client(image_bytes, candidate_labels)
-        return self._call_spaces_api(image_bytes, candidate_labels)
+        """Try Inference first when model ID is set; else use Space. On Inference failure, fall back to Space."""
+        if self._use_inference_first:
+            try:
+                return self._call_inference_client(image_bytes, candidate_labels)
+            except Exception as e:
+                logger.warning(
+                    "Scene Inference failed, falling back to Space: %s", e,
+                    exc_info=False,
+                )
+                return self._call_spaces_api(
+                    image_bytes, candidate_labels, self._space_fallback_url,
+                )
+        return self._call_spaces_api(image_bytes, candidate_labels, self._api_url)
 
     def _call_inference_client(
         self, image_bytes: bytes, candidate_labels: List[str],
@@ -80,9 +93,9 @@ class HFSceneProvider(BaseSceneProvider):
         )
 
     def _call_spaces_api(
-        self, image_bytes: bytes, candidate_labels: List[str],
+        self, image_bytes: bytes, candidate_labels: List[str], url: str,
     ) -> List[Dict[str, Any]]:
-        """Legacy HF Spaces: multipart form with ``file`` + ``labels``."""
+        """HF Spaces: multipart form with ``file`` + ``labels``."""
         headers: Dict[str, str] = {}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
@@ -93,7 +106,7 @@ class HFSceneProvider(BaseSceneProvider):
         }
         timeout = getattr(self._session, "default_timeout", 60)
         response = self._session.post(
-            self._api_url, headers=headers, files=files, timeout=timeout,
+            url, headers=headers, files=files, timeout=timeout,
         )
         response.raise_for_status()
         return self._normalize_result(response.json())

@@ -1,8 +1,7 @@
 """HuggingFace image-tagging provider.
 
-Supports:
-- InferenceClient (model ID) - new Inference Providers API
-- HF Spaces (URL)
+Uses Inference API first (model ID), falls back to HF Space URL if Inference fails.
+If configured with a URL only, uses Space only.
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ from shared.utils.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SPACE_URL = "https://phantomfury-kaleidoscope-image-tagger.hf.space/tag"
+
 IMAGE_TAGS: List[str] = [
     "person", "people", "face", "car", "vehicle", "building", "architecture",
     "tree", "nature", "sky", "water", "beach", "mountain", "forest",
@@ -33,7 +34,7 @@ IMAGE_TAGS: List[str] = [
 
 
 class HFTaggerProvider(BaseTaggerProvider):
-    """Image tagging via InferenceClient or HF Spaces."""
+    """Image tagging: Inference first, then fallback to HF Space."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -41,12 +42,15 @@ class HFTaggerProvider(BaseTaggerProvider):
         )
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
-        self._use_inference_client = is_model_id(self._api_url)
+        self._use_inference_first = is_model_id(self._api_url)
+        self._space_fallback_url: str = os.getenv(
+            "HF_TAGGER_SPACE_URL", DEFAULT_SPACE_URL
+        )
 
         if not self._api_url:
             logger.warning("HF_TAGGER_API_URL / HF_API_URL not configured")
         else:
-            mode = "Inference Providers" if self._use_inference_client else "HF Space"
+            mode = "Inference first (fallback Space)" if self._use_inference_first else "HF Space"
             logger.info("Tagger provider using %s: %s", mode, self._api_url)
 
     @property
@@ -56,10 +60,17 @@ class HFTaggerProvider(BaseTaggerProvider):
     # ------------------------------------------------------------------
 
     def _call_api(self, image_bytes: bytes) -> Dict[str, float]:
-        """POST the image and return a ``{tag: score}`` mapping."""
-        if self._use_inference_client:
-            return self._call_inference_client(image_bytes)
-        return self._call_spaces_api(image_bytes)
+        """Try Inference first when model ID is set; else use Space. On Inference failure, fall back to Space."""
+        if self._use_inference_first:
+            try:
+                return self._call_inference_client(image_bytes)
+            except Exception as e:
+                logger.warning(
+                    "Tagger Inference failed, falling back to Space: %s", e,
+                    exc_info=False,
+                )
+                return self._call_spaces_api(image_bytes, self._space_fallback_url)
+        return self._call_spaces_api(image_bytes, self._api_url)
 
     def _call_inference_client(self, image_bytes: bytes) -> Dict[str, float]:
         """InferenceClient (Inference Providers API)."""
@@ -68,8 +79,8 @@ class HFTaggerProvider(BaseTaggerProvider):
         )
         return {item["label"]: item["score"] for item in result}
 
-    def _call_spaces_api(self, image_bytes: bytes) -> Dict[str, float]:
-        """Legacy HF Spaces: multipart form with ``file`` + ``labels``."""
+    def _call_spaces_api(self, image_bytes: bytes, url: str) -> Dict[str, float]:
+        """HF Spaces: multipart form with ``file`` + ``labels``."""
         headers: Dict[str, str] = {}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
@@ -80,7 +91,7 @@ class HFTaggerProvider(BaseTaggerProvider):
         }
         timeout = getattr(self._session, "default_timeout", 60)
         response = self._session.post(
-            self._api_url, headers=headers, files=files, timeout=timeout,
+            url, headers=headers, files=files, timeout=timeout,
         )
         response.raise_for_status()
         return self._parse_label_scores(response.json())
