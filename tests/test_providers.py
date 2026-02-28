@@ -69,44 +69,44 @@ class TestModerationInferenceProviders:
 
 
 class TestTaggerInferenceProviders:
-    """Test tagger provider with InferenceClient (model ID)."""
+    """Test tagger provider with image-classification (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    @patch("shared.providers.huggingface.tagger.inference_client_zero_shot_image_classification")
+    @patch("shared.providers.huggingface.tagger.inference_client_image_classification")
     def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_TAGGER_API_URL",
-            "openai/clip-vit-large-patch14",
+            "google/vit-base-patch16-224",
         )
         mock_inference.return_value = [
-            {"label": "nature", "score": 0.8},
-            {"label": "outdoor", "score": 0.6},
-            {"label": "tree", "score": 0.4},
+            {"label": "golden retriever", "score": 0.8},
+            {"label": "tennis ball", "score": 0.6},
+            {"label": "grass", "score": 0.4},
         ]
         provider = get_provider("tagging")
         result = provider.tag(b"fake-image-bytes", top_n=3)
-        assert "nature" in result.tags
+        assert "golden retriever" in result.tags
         assert len(result.tags) <= 3
         mock_inference.assert_called_once()
 
 
 class TestSceneInferenceProviders:
-    """Test scene provider with InferenceClient (model ID)."""
+    """Test scene provider with image-classification (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    @patch("shared.providers.huggingface.scene.inference_client_zero_shot_image_classification")
+    @patch("shared.providers.huggingface.scene.inference_client_image_classification")
     def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_SCENE_API_URL",
-            "openai/clip-vit-large-patch14",
+            "google/vit-base-patch16-224",
         )
         mock_inference.return_value = [
             {"label": "beach", "score": 0.7},
-            {"label": "outdoor", "score": 0.5},
+            {"label": "seashore", "score": 0.5},
         ]
         provider = get_provider("scene")
         result = provider.recognize(b"fake-image-bytes")

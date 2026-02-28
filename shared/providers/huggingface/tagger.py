@@ -1,7 +1,7 @@
 """HuggingFace image-tagging provider.
 
-Uses Inference API first (model ID), falls back to HF Space URL if Inference fails.
-If configured with a URL only, uses Space only.
+Uses image-classification via Inference API (model generates its own labels).
+Falls back to HF Space on permanent failure.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from shared.providers.base import BaseTaggerProvider
 from shared.providers.types import TaggingResult
 from shared.utils.http_client import get_http_session
 from shared.utils.hf_inference import (
-    inference_client_zero_shot_image_classification,
+    inference_client_image_classification,
     is_model_id,
-    post_zero_shot_image,
+    post_image_binary,
 )
 from shared.utils.secrets import get_secret
 
@@ -25,16 +25,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SPACE_URL = "https://phantomfury-kaleidoscope-image-tagger.hf.space/tag"
 
-IMAGE_TAGS: List[str] = [
-    "person", "people", "face", "car", "vehicle", "building", "architecture",
-    "tree", "nature", "sky", "water", "beach", "mountain", "forest",
-    "food", "animal", "dog", "cat", "bird", "indoor", "outdoor",
-    "city", "street", "road", "sunset", "sunrise", "night", "day",
-]
-
 
 class HFTaggerProvider(BaseTaggerProvider):
-    """Image tagging: Inference first, then fallback to HF Space."""
+    """Image tagging via Inference API (image-classification)."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -51,7 +44,7 @@ class HFTaggerProvider(BaseTaggerProvider):
         if not self._api_url:
             logger.warning("HF_TAGGER_API_URL / HF_API_URL not configured")
         else:
-            mode = "Inference first (fallback Space)" if self._use_inference_first else "HF Space"
+            mode = "Inference" if self._use_inference_first else "HF Space"
             logger.info("Tagger provider using %s: %s", mode, self._api_url)
 
     @property
@@ -80,22 +73,19 @@ class HFTaggerProvider(BaseTaggerProvider):
         return self._call_spaces_api(image_bytes, self._api_url)
 
     def _call_inference_client(self, image_bytes: bytes) -> Dict[str, float]:
-        """InferenceClient (Inference Providers API)."""
-        result = inference_client_zero_shot_image_classification(
-            self._api_url, image_bytes, IMAGE_TAGS, self._api_token,
+        """image-classification via InferenceClient -- model picks its own labels."""
+        result = inference_client_image_classification(
+            self._api_url, image_bytes, self._api_token,
         )
         return {item["label"]: item["score"] for item in result}
 
     def _call_spaces_api(self, image_bytes: bytes, url: str) -> Dict[str, float]:
-        """HF Spaces: multipart form with ``file`` + ``labels``."""
+        """HF Spaces fallback."""
         headers: Dict[str, str] = {}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
 
-        files = {
-            "file": ("image.jpg", image_bytes, "image/jpeg"),
-            "labels": (None, json.dumps(IMAGE_TAGS)),
-        }
+        files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
         timeout = getattr(self._session, "default_timeout", 60)
         response = self._session.post(
             url, headers=headers, files=files, timeout=timeout,
@@ -105,13 +95,7 @@ class HFTaggerProvider(BaseTaggerProvider):
 
     @staticmethod
     def _parse_label_scores(api_result: Any) -> Dict[str, float]:
-        """Parse Space response into {tag: score}.
-
-        Handles these formats:
-        - {"tags": ["person", ...], "scores": {"person": 0.37, ...}}
-        - {"results": [{label, score}, ...]}
-        - [{label, score}, ...]
-        """
+        """Parse any response shape into {tag: score}."""
         if isinstance(api_result, dict):
             scores_dict = api_result.get("scores")
             if isinstance(scores_dict, dict) and scores_dict:
@@ -146,9 +130,6 @@ class HFTaggerProvider(BaseTaggerProvider):
             sorted_tags = sorted(
                 api_scores.items(), key=lambda x: x[1], reverse=True
             )[:top_n]
-            logger.info(
-                "No tags above threshold=%.4f; returning top-%d anyway", threshold, top_n
-            )
 
         return TaggingResult(
             tags=[t for t, _ in sorted_tags],
