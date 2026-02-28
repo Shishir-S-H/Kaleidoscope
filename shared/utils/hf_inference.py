@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from requests import Session
 
@@ -43,6 +45,41 @@ def get_inference_client(token: Optional[str] = None):
 # ---------------------------------------------------------------------------
 
 
+def _image_suffix_from_bytes(image_bytes: bytes) -> str:
+    """Return file suffix (e.g. '.png') from image magic bytes. Default '.jpg'."""
+    if len(image_bytes) >= 8:
+        if image_bytes[:4] == b"\x89PNG":
+            return ".png"
+        if image_bytes[:3] == b"\xff\xd8\xff":
+            return ".jpg"
+        if image_bytes[:6] in (b"GIF87a", b"GIF89a"):
+            return ".gif"
+        if image_bytes[:4] == b"RIFF" and len(image_bytes) >= 12 and image_bytes[8:12] == b"WEBP":
+            return ".webp"
+    return ".jpg"
+
+
+def _image_for_inference(image_bytes: bytes) -> Tuple[Any, bool]:
+    """
+    Return (image_input, is_temp_path) for InferenceClient calls.
+    Uses a temp file with the correct extension so the API receives a proper Content-Type.
+    Caller must close/delete the temp file when is_temp_path is True (we use a context manager below).
+    """
+    suffix = _image_suffix_from_bytes(image_bytes)
+    f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        f.write(image_bytes)
+        f.close()
+        return (Path(f.name), True)
+    except Exception:
+        f.close()
+        try:
+            Path(f.name).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return (image_bytes, False)
+
+
 def inference_client_image_classification(
     model_id: str,
     image_bytes: bytes,
@@ -50,11 +87,19 @@ def inference_client_image_classification(
 ) -> List[Dict[str, Any]]:
     """Run image classification via InferenceClient. Returns [{label, score}]."""
     client = get_inference_client(token)
-    result = client.image_classification(image_bytes, model=model_id)
-    return [
-        {"label": item.label, "score": float(item.score)}
-        for item in result
-    ]
+    image_input, is_temp = _image_for_inference(image_bytes)
+    try:
+        result = client.image_classification(image_input, model=model_id)
+        return [
+            {"label": item.label, "score": float(item.score)}
+            for item in result
+        ]
+    finally:
+        if is_temp and isinstance(image_input, Path) and image_input.exists():
+            try:
+                image_input.unlink()
+            except Exception:
+                pass
 
 
 def inference_client_zero_shot_image_classification(
@@ -65,15 +110,23 @@ def inference_client_zero_shot_image_classification(
 ) -> List[Dict[str, Any]]:
     """Run zero-shot image classification via InferenceClient. Returns [{label, score}]."""
     client = get_inference_client(token)
-    result = client.zero_shot_image_classification(
-        image_bytes,
-        candidate_labels=candidate_labels,
-        model=model_id,
-    )
-    return [
-        {"label": item.label, "score": float(item.score)}
-        for item in result
-    ]
+    image_input, is_temp = _image_for_inference(image_bytes)
+    try:
+        result = client.zero_shot_image_classification(
+            image_input,
+            candidate_labels=candidate_labels,
+            model=model_id,
+        )
+        return [
+            {"label": item.label, "score": float(item.score)}
+            for item in result
+        ]
+    finally:
+        if is_temp and isinstance(image_input, Path) and image_input.exists():
+            try:
+                image_input.unlink()
+            except Exception:
+                pass
 
 
 def inference_client_image_to_text(
@@ -83,10 +136,18 @@ def inference_client_image_to_text(
 ) -> str:
     """Run image-to-text (captioning) via InferenceClient. Returns caption string."""
     client = get_inference_client(token)
-    result = client.image_to_text(image_bytes, model=model_id)
-    if hasattr(result, "generated_text"):
-        return result.generated_text or ""
-    return str(result) if result else ""
+    image_input, is_temp = _image_for_inference(image_bytes)
+    try:
+        result = client.image_to_text(image_input, model=model_id)
+        if hasattr(result, "generated_text"):
+            return result.generated_text or ""
+        return str(result) if result else ""
+    finally:
+        if is_temp and isinstance(image_input, Path) and image_input.exists():
+            try:
+                image_input.unlink()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
