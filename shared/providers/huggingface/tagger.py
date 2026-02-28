@@ -1,4 +1,8 @@
-"""HuggingFace image-tagging provider."""
+"""HuggingFace image-tagging provider.
+
+Supports both HF Inference API (``api-inference.huggingface.co``,
+zero-shot-image-classification) and custom HF Spaces endpoints.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from typing import Any, Dict, List, Tuple
 from shared.providers.base import BaseTaggerProvider
 from shared.providers.types import TaggingResult
 from shared.utils.http_client import get_http_session
+from shared.utils.hf_inference import post_zero_shot_image
 from shared.utils.secrets import get_secret
 
 logger = logging.getLogger(__name__)
@@ -22,8 +27,12 @@ IMAGE_TAGS: List[str] = [
 ]
 
 
+def _is_inference_api(url: str) -> bool:
+    return "api-inference.huggingface.co" in url
+
+
 class HFTaggerProvider(BaseTaggerProvider):
-    """Image tagging via a HuggingFace zero-shot classification endpoint."""
+    """Image tagging via HF Inference API or a custom HF Space."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -31,9 +40,13 @@ class HFTaggerProvider(BaseTaggerProvider):
         )
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
+        self._use_inference_api = _is_inference_api(self._api_url)
 
         if not self._api_url:
             logger.warning("HF_TAGGER_API_URL / HF_API_URL not configured")
+        else:
+            mode = "Inference API" if self._use_inference_api else "HF Space"
+            logger.info("Tagger provider using %s: %s", mode, self._api_url)
 
     @property
     def name(self) -> str:
@@ -43,6 +56,20 @@ class HFTaggerProvider(BaseTaggerProvider):
 
     def _call_api(self, image_bytes: bytes) -> Dict[str, float]:
         """POST the image and return a ``{tag: score}`` mapping."""
+        if self._use_inference_api:
+            return self._call_inference_api(image_bytes)
+        return self._call_spaces_api(image_bytes)
+
+    def _call_inference_api(self, image_bytes: bytes) -> Dict[str, float]:
+        """HF Inference API: zero-shot-image-classification with candidate labels."""
+        api_result = post_zero_shot_image(
+            self._session, self._api_url, self._api_token,
+            image_bytes, IMAGE_TAGS,
+        )
+        return self._parse_label_scores(api_result)
+
+    def _call_spaces_api(self, image_bytes: bytes) -> Dict[str, float]:
+        """Legacy HF Spaces: multipart form with ``file`` + ``labels``."""
         headers: Dict[str, str] = {}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
@@ -51,48 +78,22 @@ class HFTaggerProvider(BaseTaggerProvider):
             "file": ("image.jpg", image_bytes, "image/jpeg"),
             "labels": (None, json.dumps(IMAGE_TAGS)),
         }
-
         timeout = getattr(self._session, "default_timeout", 60)
         response = self._session.post(
-            self._api_url, headers=headers, files=files, timeout=timeout
+            self._api_url, headers=headers, files=files, timeout=timeout,
         )
         response.raise_for_status()
+        return self._parse_label_scores(response.json())
 
-        api_result: Any = response.json()
-
+    @staticmethod
+    def _parse_label_scores(api_result: Any) -> Dict[str, float]:
         if isinstance(api_result, dict) and "results" in api_result:
             api_result = api_result["results"]
-
         scores: Dict[str, float] = {}
-
         if isinstance(api_result, list):
             for item in api_result:
                 if "label" in item and "score" in item:
                     scores[item["label"]] = float(item["score"])
-
-        elif isinstance(api_result, dict):
-            tags = api_result.get("tags")
-            tag_scores = api_result.get("scores")
-
-            if isinstance(tags, list) and isinstance(tag_scores, list):
-                for tag, score in zip(tags, tag_scores):
-                    if tag is not None and score is not None:
-                        try:
-                            scores[tag] = float(score)
-                        except (ValueError, TypeError):
-                            logger.warning("Skipping non-numeric score for tag=%s", tag)
-            elif isinstance(tags, list) and isinstance(tag_scores, dict):
-                for tag in tags:
-                    if tag is not None and tag in tag_scores:
-                        try:
-                            scores[tag] = float(tag_scores[tag])
-                        except (ValueError, TypeError):
-                            logger.warning("Skipping non-numeric score for tag=%s", tag)
-            else:
-                for key, value in api_result.items():
-                    if key not in ("tags", "scores") and isinstance(value, (int, float)):
-                        scores[key] = float(value)
-
         return scores
 
     # ------------------------------------------------------------------

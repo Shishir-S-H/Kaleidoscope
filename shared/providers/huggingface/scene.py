@@ -1,4 +1,8 @@
-"""HuggingFace scene-recognition provider."""
+"""HuggingFace scene-recognition provider.
+
+Supports both HF Inference API (``api-inference.huggingface.co``,
+zero-shot-image-classification) and custom HF Spaces endpoints.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from typing import Any, Dict, List
 from shared.providers.base import BaseSceneProvider
 from shared.providers.types import SceneResult
 from shared.utils.http_client import get_http_session
+from shared.utils.hf_inference import post_zero_shot_image
 from shared.utils.secrets import get_secret
 
 logger = logging.getLogger(__name__)
@@ -23,8 +28,12 @@ DEFAULT_SCENE_LABELS: List[str] = [
 _DEFAULT_THRESHOLD = 0.005
 
 
+def _is_inference_api(url: str) -> bool:
+    return "api-inference.huggingface.co" in url
+
+
 class HFSceneProvider(BaseSceneProvider):
-    """Scene recognition via a HuggingFace zero-shot classification endpoint."""
+    """Scene recognition via HF Inference API or a custom HF Space."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -32,6 +41,7 @@ class HFSceneProvider(BaseSceneProvider):
         )
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
+        self._use_inference_api = _is_inference_api(self._api_url)
 
         raw_labels = os.getenv("SCENE_LABELS", "")
         self._scene_labels: List[str] = (
@@ -42,6 +52,9 @@ class HFSceneProvider(BaseSceneProvider):
 
         if not self._api_url:
             logger.warning("HF_SCENE_API_URL / HF_API_URL not configured")
+        else:
+            mode = "Inference API" if self._use_inference_api else "HF Space"
+            logger.info("Scene provider using %s: %s", mode, self._api_url)
 
     @property
     def name(self) -> str:
@@ -50,9 +63,27 @@ class HFSceneProvider(BaseSceneProvider):
     # ------------------------------------------------------------------
 
     def _call_api(
-        self, image_bytes: bytes, candidate_labels: List[str]
+        self, image_bytes: bytes, candidate_labels: List[str],
     ) -> List[Dict[str, Any]]:
         """POST the image and return a list of ``{label, score}`` dicts."""
+        if self._use_inference_api:
+            return self._call_inference_api(image_bytes, candidate_labels)
+        return self._call_spaces_api(image_bytes, candidate_labels)
+
+    def _call_inference_api(
+        self, image_bytes: bytes, candidate_labels: List[str],
+    ) -> List[Dict[str, Any]]:
+        """HF Inference API: zero-shot-image-classification."""
+        api_result = post_zero_shot_image(
+            self._session, self._api_url, self._api_token,
+            image_bytes, candidate_labels,
+        )
+        return self._normalize_result(api_result)
+
+    def _call_spaces_api(
+        self, image_bytes: bytes, candidate_labels: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Legacy HF Spaces: multipart form with ``file`` + ``labels``."""
         headers: Dict[str, str] = {}
         if self._api_token:
             headers["Authorization"] = f"Bearer {self._api_token}"
@@ -61,15 +92,16 @@ class HFSceneProvider(BaseSceneProvider):
             "file": ("image.jpg", image_bytes, "image/jpeg"),
             "labels": (None, json.dumps(candidate_labels)),
         }
-
         timeout = getattr(self._session, "default_timeout", 60)
         response = self._session.post(
-            self._api_url, headers=headers, files=files, timeout=timeout
+            self._api_url, headers=headers, files=files, timeout=timeout,
         )
         response.raise_for_status()
+        return self._normalize_result(response.json())
 
-        api_result: Any = response.json()
-
+    @staticmethod
+    def _normalize_result(api_result: Any) -> List[Dict[str, Any]]:
+        """Coerce any response shape into ``[{label, score}]``."""
         if isinstance(api_result, dict):
             if "results" in api_result:
                 api_result = api_result["results"]
@@ -77,7 +109,7 @@ class HFSceneProvider(BaseSceneProvider):
                 labels = api_result.get("labels") or []
                 scores = api_result.get("scores") or []
                 api_result = [
-                    {"label": l, "score": s} for l, s in zip(labels, scores)
+                    {"label": lb, "score": s} for lb, s in zip(labels, scores)
                 ]
             elif "scenes" in api_result and "scores" in api_result:
                 scenes = api_result.get("scenes") or []
@@ -92,7 +124,6 @@ class HFSceneProvider(BaseSceneProvider):
                     if isinstance(v, (int, float))
                 ]
                 api_result = converted or api_result
-
         return api_result if isinstance(api_result, list) else []
 
     # ------------------------------------------------------------------
@@ -127,7 +158,7 @@ class HFSceneProvider(BaseSceneProvider):
             top = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
             filtered = dict(top)
             logger.info(
-                "No scenes above threshold=%.4f; returning top-3 anyway", threshold
+                "No scenes above threshold=%.4f; returning top-3 anyway", threshold,
             )
 
         return SceneResult(
