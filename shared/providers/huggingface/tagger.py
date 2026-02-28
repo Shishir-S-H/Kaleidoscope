@@ -98,8 +98,20 @@ class HFTaggerProvider(BaseTaggerProvider):
 
     @staticmethod
     def _parse_label_scores(api_result: Any) -> Dict[str, float]:
-        if isinstance(api_result, dict) and "results" in api_result:
-            api_result = api_result["results"]
+        """Parse Space response into {tag: score}.
+
+        Handles these formats:
+        - {"tags": ["person", ...], "scores": {"person": 0.37, ...}}
+        - {"results": [{label, score}, ...]}
+        - [{label, score}, ...]
+        """
+        if isinstance(api_result, dict):
+            scores_dict = api_result.get("scores")
+            if isinstance(scores_dict, dict) and scores_dict:
+                return {k: float(v) for k, v in scores_dict.items()
+                        if isinstance(v, (int, float))}
+            if "results" in api_result:
+                api_result = api_result["results"]
         scores: Dict[str, float] = {}
         if isinstance(api_result, list):
             for item in api_result:

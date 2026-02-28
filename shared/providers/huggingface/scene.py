@@ -113,8 +113,23 @@ class HFSceneProvider(BaseSceneProvider):
 
     @staticmethod
     def _normalize_result(api_result: Any) -> List[Dict[str, Any]]:
-        """Coerce any response shape into ``[{label, score}]``."""
+        """Coerce any response shape into ``[{label, score}]``.
+
+        Handles these Space response formats:
+        - {"scene": "rural", "confidence": 0.15, "scores": {"rural": 0.15, ...}}
+        - {"results": [{label, score}, ...]}
+        - {"labels": [...], "scores": [...]}
+        - {"scenes": [...], "scores": [...]}
+        - [{label, score}, ...]
+        """
         if isinstance(api_result, dict):
+            scores_dict = api_result.get("scores")
+            if isinstance(scores_dict, dict) and scores_dict:
+                return [
+                    {"label": k, "score": v}
+                    for k, v in scores_dict.items()
+                    if isinstance(v, (int, float))
+                ]
             if "results" in api_result:
                 api_result = api_result["results"]
             elif "labels" in api_result and "scores" in api_result:
