@@ -11,9 +11,16 @@ services:
     env_file:
       - ./shared/env_templates/content_moderation.env
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
     depends_on:
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -29,9 +36,16 @@ services:
     env_file:
       - ./shared/env_templates/image_tagger.env
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
     depends_on:
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -47,9 +61,16 @@ services:
     env_file:
       - ./shared/env_templates/scene_recognition.env
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
     depends_on:
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -65,9 +86,16 @@ services:
     env_file:
       - ./shared/env_templates/image_captioning.env
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
     depends_on:
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -133,10 +161,17 @@ services:
     env_file:
       - ./shared/env_templates/face_recognition.env
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
     depends_on:
       - redis
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -149,10 +184,16 @@ services:
       - ./services/post_aggregator:/app
       - ./shared:/app/shared
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
     depends_on:
       - redis
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -165,12 +206,43 @@ services:
       - ./services/es_sync:/app
       - ./shared:/app/shared
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
-      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD:-changeme123}@elasticsearch:9200
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required}@elasticsearch:9200
+    depends_on:
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  dlq_processor:
+    build: ./services/dlq_processor
+    volumes:
+      - ./services/dlq_processor:/app
+      - ./shared:/app/shared
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - DLQ_AUTO_RETRY=false
     depends_on:
       - redis
-      - elasticsearch
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:
@@ -193,8 +265,8 @@ services:
       # Development overrides - point to internal Docker service names
       - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200/
       - SPRING_ELASTICSEARCH_USERNAME=elastic
-      - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-changeme123}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379
+      - SPRING_ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
     ports:
       - "${APP_PORT:-8080}:8080"
     logging:
@@ -244,9 +316,9 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme123} --protected-mode yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required} --protected-mode yes
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme123}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD required}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -265,10 +337,16 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=false
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:-changeme123}
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required}
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
     volumes:
       - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required} http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     logging:
       driver: json-file
       options:

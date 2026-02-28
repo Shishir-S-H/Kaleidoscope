@@ -1,82 +1,117 @@
-"""Pydantic schemas for Redis Stream messages."""
+"""Pydantic schemas for Redis Stream message validation.
 
-from typing import List, Optional
-from pydantic import BaseModel, Field
+These schemas match the actual camelCase field names used in Redis Stream
+messages. Use validate_incoming() / validate_outgoing() in workers to
+enforce structure at runtime.
+"""
+
+import json
+import logging
+from typing import Any, Dict, List, Optional, Type, TypeVar
+
+from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class PostImageProcessingMessage(BaseModel):
-    """Message to trigger AI processing for an image."""
-    media_id: int = Field(..., description="Media ID from post_media table")
-    post_id: int = Field(..., description="Post ID that contains this media")
-    media_url: str = Field(..., description="URL of the image to process")
-    uploader_id: int = Field(..., description="User ID who uploaded the image")
+    """Incoming message on the post-image-processing stream."""
+    mediaId: str = Field(..., description="Media ID")
+    postId: str = Field(..., description="Post ID")
+    mediaUrl: str = Field(..., description="Image URL to process")
+    correlationId: Optional[str] = Field("", description="Correlation ID for tracing")
+    version: Optional[str] = Field(None)
 
 
 class MLInsightsResultMessage(BaseModel):
-    """Message containing ML insights results."""
-    media_id: int = Field(..., description="Media ID")
-    post_id: int = Field(..., description="Post ID")
-    service: str = Field(..., description="Service name (tagging, captioning, scene_recognition, moderation)")
+    """Outgoing message on the ml-insights-results stream."""
+    mediaId: str
+    postId: str
+    service: str
+    timestamp: str
+    version: str = "1"
     
-    # Content moderation fields
-    is_safe: Optional[bool] = Field(None, description="Whether content is safe")
-    moderation_confidence: Optional[float] = Field(None, description="Confidence score for moderation")
-    
-    # Tagging fields
-    tags: Optional[List[str]] = Field(None, description="AI-generated tags")
-    
-    # Scene recognition fields
-    scenes: Optional[List[str]] = Field(None, description="AI-detected scenes")
-    
-    # Captioning fields
-    caption: Optional[str] = Field(None, description="AI-generated caption")
+    isSafe: Optional[str] = None
+    moderationConfidence: Optional[str] = None
+    tags: Optional[str] = None
+    scenes: Optional[str] = None
+    caption: Optional[str] = None
 
 
 class FaceDetectionResultMessage(BaseModel):
-    """Message containing face detection results."""
-    
-    class DetectedFace(BaseModel):
-        """Single detected face."""
-        face_id: str = Field(..., description="Unique face ID (UUID)")
-        bbox: List[int] = Field(..., description="Bounding box [x, y, width, height]")
-        embedding: str = Field(..., description="1024-dim face embedding as JSON string")
-        confidence: float = Field(..., description="Detection confidence score")
-    
-    media_id: int = Field(..., description="Media ID")
-    post_id: int = Field(..., description="Post ID")
-    faces_detected: int = Field(..., description="Number of faces detected")
-    faces: List[DetectedFace] = Field(..., description="List of detected faces")
+    """Outgoing message on the face-detection-results stream."""
+    mediaId: str
+    postId: str
+    facesDetected: str
+    faces: str  # JSON-encoded list
+    timestamp: str
+    version: str = "1"
 
 
 class PostAggregationTriggerMessage(BaseModel):
-    """Message to trigger post-level aggregation."""
-    post_id: int = Field(..., description="Post ID to aggregate")
-    total_media_count: int = Field(..., description="Total number of media items in post")
+    """Incoming trigger on the post-aggregation-trigger stream."""
+    postId: str
+    mediaInsights: Optional[str] = "[]"
+    allMediaIds: Optional[str] = None
+    totalMedia: Optional[str] = None
+    correlationId: Optional[str] = ""
+    version: Optional[str] = None
 
 
 class PostInsightsEnrichedMessage(BaseModel):
-    """Message containing enriched post-level insights."""
-    post_id: int = Field(..., description="Post ID")
-    all_ai_tags: List[str] = Field(..., description="Union of all media tags")
-    all_ai_scenes: List[str] = Field(..., description="Union of all media scenes")
-    all_detected_user_ids: List[int] = Field(default_factory=list, description="All detected user IDs")
-    inferred_event_type: Optional[str] = Field(None, description="Inferred event type (beach_party, meeting, etc.)")
-    inferred_tags: List[str] = Field(default_factory=list, description="Enhanced semantic tags")
+    """Outgoing message on the post-insights-enriched stream."""
+    postId: str
+    mediaCount: str
+    allAiTags: str
+    allAiScenes: str
+    aggregatedTags: str
+    aggregatedScenes: str
+    totalFaces: str
+    isSafe: str
+    moderationConfidence: str
+    inferredEventType: str
+    combinedCaption: str
+    hasMultipleImages: str
+    timestamp: str
+    correlationId: Optional[str] = ""
+    version: str = "1"
 
 
 class ESSyncEventMessage(BaseModel):
-    """Message to trigger Elasticsearch sync."""
-    index_name: str = Field(..., description="Target ES index name")
-    operation: str = Field(..., description="Operation: INDEX, UPDATE, DELETE, BULK")
-    document_id: int = Field(..., description="Document ID (or post_id for BULK)")
-    
-    class Config:
-        """Pydantic config."""
-        json_schema_extra = {
-            "example": {
-                "index_name": "media_search",
-                "operation": "INDEX",
-                "document_id": 123
-            }
-        }
+    """Incoming message on the es-sync-queue stream."""
+    indexType: str
+    documentId: str
+    operation: Optional[str] = "index"
+    version: Optional[str] = None
 
+
+class DLQMessage(BaseModel):
+    """Message on the ai-processing-dlq stream."""
+    originalMessageId: Optional[str] = None
+    serviceName: Optional[str] = None
+    error: Optional[str] = None
+    errorType: Optional[str] = None
+    retryCount: Optional[str] = None
+    timestamp: Optional[str] = None
+    version: str = "1"
+
+
+def validate_incoming(data: Dict[str, Any], schema: Type[T]) -> T:
+    """Validate an incoming decoded message against a schema.
+    
+    Returns the validated model instance.
+    Raises pydantic.ValidationError on failure.
+    """
+    return schema.model_validate(data)
+
+
+def validate_outgoing(data: Dict[str, Any], schema: Type[T]) -> Dict[str, Any]:
+    """Validate an outgoing message dict against a schema.
+    
+    Returns the dict unchanged if valid.
+    Raises pydantic.ValidationError on failure.
+    """
+    schema.model_validate(data)
+    return data

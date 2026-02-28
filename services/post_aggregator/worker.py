@@ -6,7 +6,9 @@ Aggregates AI insights from multiple images in a post to derive post-level insig
 
 import json
 import os
+import signal
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Any, Set, Optional
 from collections import Counter
@@ -24,7 +26,10 @@ load_dotenv()
 from shared.utils.logger import get_logger
 from shared.redis_streams import RedisStreamPublisher, RedisStreamConsumer
 from shared.redis_streams.utils import decode_message
+from shared.utils.health_server import start_health_server, mark_ready
+from shared.utils.secrets import get_secret
 import redis
+import requests
 
 # Initialize logger
 LOGGER = get_logger("post-aggregator")
@@ -42,6 +47,18 @@ AGGREGATION_WAIT_SECONDS = float(os.getenv("AGGREGATION_WAIT_SECONDS", "6"))
 AGGREGATION_POLL_INTERVAL = float(os.getenv("AGGREGATION_POLL_INTERVAL", "0.5"))
 REQUIRED_SERVICES: Set[str] = {"moderation", "tagging", "scene_recognition", "image_captioning"}
 OPTIONAL_SERVICES: Set[str] = {"face"}
+
+# LLM caption summarization (optional)
+USE_LLM_CAPTIONS = os.getenv("USE_LLM_CAPTIONS", "false").lower() in ("true", "1", "yes")
+LLM_API_URL = get_secret("LLM_API_URL", "")
+LLM_API_TOKEN = get_secret("LLM_API_TOKEN", "")
+
+shutdown_event = threading.Event()
+
+
+def _shutdown_handler(signum, frame):
+    LOGGER.info("Shutdown signal received (signal %s)", signum)
+    shutdown_event.set()
 
 
 def _try_parse_json(value: Any) -> Any:
@@ -70,28 +87,87 @@ def _normalize_media_ids(raw_value: Any) -> Set[str]:
     return ids
 
 
-def _fetch_stream_entries(redis_client: redis.StrictRedis, stream: str, post_id: int, count: int = 200) -> List[Dict[str, Any]]:
-    try:
-        entries = redis_client.xrevrange(stream, max="+", min="-", count=count)
-    except Exception as err:
-        LOGGER.error("Failed to read stream entries", extra={
-            "stream": stream,
-            "post_id": post_id,
-            "error": str(err)
-        })
-        return []
+# Consumer groups for reading insights/faces streams (instead of XREVRANGE)
+INSIGHTS_CONSUMER_GROUP = "post-aggregator-insights-reader"
+INSIGHTS_CONSUMER_NAME = "post-aggregator-insights-reader-1"
+FACES_CONSUMER_GROUP = "post-aggregator-faces-reader"
+FACES_CONSUMER_NAME = "post-aggregator-faces-reader-1"
 
-    results: List[Dict[str, Any]] = []
-    target_post = str(post_id)
-    for entry_id, values in entries:
-        post_val = values.get("postId") or values.get("post_id")
-        if post_val != target_post:
-            continue
-        entry_dict = dict(values)
-        entry_dict["_id"] = entry_id
-        entry_dict["_stream"] = stream
-        results.append(entry_dict)
-    return results
+# In-memory buffer: postId -> list of entries from insights/faces streams
+_post_buffer: Dict[str, List[Dict[str, Any]]] = {}
+_buffer_lock = threading.Lock()
+
+
+def _ensure_reader_groups(redis_client: redis.StrictRedis):
+    """Create consumer groups for the insights and faces streams if they don't exist."""
+    for stream, group in [
+        (INSIGHTS_STREAM, INSIGHTS_CONSUMER_GROUP),
+        (FACES_STREAM, FACES_CONSUMER_GROUP),
+    ]:
+        try:
+            redis_client.xgroup_create(stream, group, id="0", mkstream=True)
+            LOGGER.info("Created reader group '%s' on stream '%s'", group, stream)
+        except redis.exceptions.ResponseError as e:
+            if "BUSYGROUP" not in str(e):
+                raise
+
+
+def _drain_stream(
+    redis_client: redis.StrictRedis,
+    stream: str,
+    group: str,
+    consumer_name: str,
+    batch: int = 100,
+):
+    """Read all pending + new messages from a stream via its consumer group and buffer them by postId."""
+    try:
+        messages = redis_client.xreadgroup(
+            groupname=group,
+            consumername=consumer_name,
+            streams={stream: ">"},
+            count=batch,
+            block=0,
+        )
+    except Exception as err:
+        LOGGER.error("Failed to drain stream", extra={"stream": stream, "error": str(err)})
+        return
+
+    if not messages:
+        return
+
+    for _stream_name, stream_messages in messages:
+        for msg_id, values in stream_messages:
+            post_val = values.get("postId") or values.get("post_id")
+            if not post_val:
+                redis_client.xack(stream, group, msg_id)
+                continue
+
+            entry = dict(values)
+            entry["_id"] = msg_id
+            entry["_stream"] = stream
+
+            with _buffer_lock:
+                _post_buffer.setdefault(post_val, []).append(entry)
+
+            redis_client.xack(stream, group, msg_id)
+
+
+def _fetch_buffered_entries(post_id: int) -> List[Dict[str, Any]]:
+    """Return and clear all buffered entries for a given postId."""
+    target = str(post_id)
+    with _buffer_lock:
+        entries = _post_buffer.pop(target, [])
+    return entries
+
+
+def _fetch_stream_entries_via_groups(
+    redis_client: redis.StrictRedis,
+    post_id: int,
+) -> List[Dict[str, Any]]:
+    """Drain both streams into the buffer and return entries for the given post."""
+    _drain_stream(redis_client, INSIGHTS_STREAM, INSIGHTS_CONSUMER_GROUP, INSIGHTS_CONSUMER_NAME)
+    _drain_stream(redis_client, FACES_STREAM, FACES_CONSUMER_GROUP, FACES_CONSUMER_NAME)
+    return _fetch_buffered_entries(post_id)
 
 
 def _merge_media_entry(media_map: Dict[str, Dict[str, Any]], entry: Any) -> None:
@@ -178,6 +254,7 @@ def collect_media_insights(
 
     try:
         redis_client = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
+        _ensure_reader_groups(redis_client)
     except Exception as err:
         LOGGER.error("Failed to initialize Redis client for aggregation fetch", extra={
             "post_id": post_id,
@@ -196,16 +273,15 @@ def collect_media_insights(
         if time.time() >= deadline:
             break
 
+        entries = _fetch_stream_entries_via_groups(redis_client, post_id)
         new_entries: List[Dict[str, Any]] = []
-        for stream in (INSIGHTS_STREAM, FACES_STREAM):
-            entries = _fetch_stream_entries(redis_client, stream, post_id)
-            for entry in entries:
-                entry_id = entry.pop("_id", None)
-                if entry_id and entry_id in seen_ids:
-                    continue
-                if entry_id:
-                    seen_ids.add(entry_id)
-                new_entries.append(entry)
+        for entry in entries:
+            entry_id = entry.pop("_id", None)
+            if entry_id and entry_id in seen_ids:
+                continue
+            if entry_id:
+                seen_ids.add(entry_id)
+            new_entries.append(entry)
 
         if not new_entries:
             if not expected_media_ids and expected_media_count is None and media_map:
@@ -287,11 +363,42 @@ EVENT_PATTERNS = {
 }
 
 
+def _llm_summarize_captions(captions: List[str], http_session: requests.Session) -> Optional[str]:
+    """Call HuggingFace text-generation API to summarize multiple captions into one."""
+    if not LLM_API_URL or not LLM_API_TOKEN:
+        return None
+
+    prompt = (
+        "Summarize the following image captions into a single cohesive sentence "
+        "that describes the overall post:\n\n"
+        + "\n".join(f"- {c}" for c in captions)
+        + "\n\nSummary:"
+    )
+
+    try:
+        resp = http_session.post(
+            LLM_API_URL,
+            headers={"Authorization": f"Bearer {LLM_API_TOKEN}"},
+            json={"inputs": prompt, "parameters": {"max_new_tokens": 80, "temperature": 0.5}},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        if isinstance(result, list) and result:
+            text = result[0].get("generated_text", "").strip()
+            if text:
+                return text
+    except Exception as exc:
+        LOGGER.warning("LLM caption summarization failed, falling back", extra={"error": str(exc)})
+    return None
+
+
 class PostAggregator:
     """Aggregates AI insights for a post."""
     
-    def __init__(self):
+    def __init__(self, http_session: Optional[requests.Session] = None):
         self.logger = LOGGER
+        self._http_session = http_session or requests.Session()
     
     def aggregate_insights(self, media_insights: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -420,6 +527,7 @@ class PostAggregator:
     def _generate_combined_caption(self, captions: List[str], tags: List[str], scenes: List[str]) -> str:
         """
         Generate a combined caption from individual captions and aggregated data.
+        Optionally uses an LLM to summarize when USE_LLM_CAPTIONS is enabled.
         
         Args:
             captions: List of individual captions
@@ -430,7 +538,6 @@ class PostAggregator:
             Combined caption
         """
         if not captions:
-            # Generate from tags and scenes
             if tags and scenes:
                 return f"A post featuring {', '.join(tags[:3])} in a {scenes[0]} setting"
             elif tags:
@@ -440,14 +547,17 @@ class PostAggregator:
             else:
                 return "A visual post"
         
-        # If single caption, return it
         if len(captions) == 1:
             return captions[0]
         
-        # Multiple captions - create summary
-        # For now, just combine them
-        # TODO: Use LLM to create better summary in future
-        return " ".join(captions[:3])  # Limit to first 3 captions
+        # Multiple captions — try LLM summarization if enabled
+        if USE_LLM_CAPTIONS:
+            llm_summary = _llm_summarize_captions(captions, self._http_session)
+            if llm_summary:
+                return llm_summary
+
+        # Fallback: concatenate first 3 captions
+        return " ".join(captions[:3])
     
     def _empty_aggregation(self) -> Dict[str, Any]:
         """Return empty aggregation result."""
@@ -549,18 +659,19 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher,
         result_message = {
             "postId": str(post_id),
             "mediaCount": str(aggregated["mediaCount"]),
-            "allAiTags": all_ai_tags_json,  # JSON string: '["tag1", "tag2"]' or '[]'
-            "allAiScenes": all_ai_scenes_json,  # JSON string: '["scene1", "scene2"]' or '[]'
-            "aggregatedTags": aggregated_tags_json,  # JSON string for consistency
-            "aggregatedScenes": aggregated_scenes_json,  # JSON string for consistency
+            "allAiTags": all_ai_tags_json,
+            "allAiScenes": all_ai_scenes_json,
+            "aggregatedTags": aggregated_tags_json,
+            "aggregatedScenes": aggregated_scenes_json,
             "totalFaces": str(aggregated["totalFaces"]),
             "isSafe": "true" if aggregated["isSafe"] else "false",
             "moderationConfidence": str(aggregated["moderationConfidence"]),
-            "inferredEventType": aggregated["inferredEventType"],  # Renamed from eventType
+            "inferredEventType": aggregated["inferredEventType"],
             "combinedCaption": aggregated["combinedCaption"],
             "hasMultipleImages": "true" if aggregated["hasMultipleImages"] else "false",
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "correlationId": correlation_id  # Use the already extracted correlation_id
+            "correlationId": correlation_id,
+            "version": "1",
         }
         
         publisher.publish(STREAM_OUTPUT, result_message)
@@ -582,23 +693,37 @@ def main():
     """Main worker function."""
     LOGGER.info("Post Aggregator Worker starting (Redis Streams)")
     LOGGER.info("Connecting to Redis Streams", extra={"redis_url": REDIS_URL})
-    
+
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+    signal.signal(signal.SIGINT, _shutdown_handler)
+
+    consumer = None
+    publisher = None
+    http_session = None
+
     try:
-        # Initialize components
+        http_session = requests.Session()
         publisher = RedisStreamPublisher(REDIS_URL)
         consumer = RedisStreamConsumer(
             REDIS_URL,
             STREAM_INPUT,
             CONSUMER_GROUP,
-            CONSUMER_NAME
+            CONSUMER_NAME,
+            shutdown_event=shutdown_event,
         )
-        aggregator = PostAggregator()
+        aggregator = PostAggregator(http_session=http_session)
         
         LOGGER.info("Connected to Redis Streams", extra={
             "input_stream": STREAM_INPUT,
             "output_stream": STREAM_OUTPUT,
             "consumer_group": CONSUMER_GROUP
         })
+
+        start_health_server(
+            service_name="post-aggregator",
+            health_fn=lambda: {"status": "healthy", "service": "post-aggregator"},
+        )
+        mark_ready()
         
         # Define handler with dependencies bound
         def message_handler(message_id: str, data: dict):
@@ -614,9 +739,15 @@ def main():
     except Exception as e:
         LOGGER.exception("Unexpected error in main loop", extra={"error": str(e)})
     finally:
-        LOGGER.info("Worker shutting down")
+        shutdown_event.set()
+        if consumer:
+            consumer.close()
+        if publisher:
+            publisher.close()
+        if http_session:
+            http_session.close()
+        LOGGER.info("Worker shut down complete")
 
 
 if __name__ == "__main__":
     main()
-

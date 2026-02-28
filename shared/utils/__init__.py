@@ -1,1 +1,1 @@
-# Shared utility modules
+"""Shared utilities for kaleidoscope-ai services."""

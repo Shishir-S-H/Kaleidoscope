@@ -1,4 +1,7 @@
 {
+  "aliases": {
+    "feed_personalized": {}
+  },
   "settings": {
     "index": {
       "number_of_shards": 2,

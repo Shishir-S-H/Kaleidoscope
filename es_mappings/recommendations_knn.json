@@ -1,4 +1,7 @@
 {
+  "aliases": {
+    "recommendations_knn": {}
+  },
   "settings": {
     "index": {
       "number_of_shards": 2,

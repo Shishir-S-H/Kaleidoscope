@@ -1,4 +1,7 @@
 {
+  "aliases": {
+    "media_search": {}
+  },
   "settings": {
     "index": {
       "number_of_shards": 2,
