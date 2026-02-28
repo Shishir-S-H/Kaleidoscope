@@ -1,8 +1,9 @@
-"""Helpers for calling the HuggingFace Inference API.
+"""Helpers for calling HuggingFace inference.
 
-Handles the differences between HF Spaces (multipart form) and the
-serverless Inference API (raw bytes / JSON), including automatic retry
-when the model is cold-starting (HTTP 503 with ``estimated_time``).
+Supports two backends:
+1. InferenceClient (huggingface_hub) - uses the new Inference Providers API
+   when *model_id* is a Hub model ID (e.g. "Falconsai/nsfw_image_detection").
+2. HTTP / HF Spaces - when *url* is a full URL (e.g. "https://...hf.space/classify").
 """
 
 from __future__ import annotations
@@ -20,8 +21,80 @@ _MAX_COLD_START_RETRIES = 3
 _DEFAULT_COLD_WAIT = 20  # seconds
 
 
+def is_model_id(value: str) -> bool:
+    """Return True if value looks like a HuggingFace model ID (e.g. org/model)."""
+    return bool(value) and "://" not in value and "/" in value
+
+
+def get_inference_client(token: Optional[str] = None):
+    """Return a HuggingFace InferenceClient for the new Inference Providers API."""
+    try:
+        from huggingface_hub import InferenceClient
+        return InferenceClient(token=token or None)
+    except ImportError as e:
+        raise ImportError(
+            "huggingface_hub is required for Inference Providers. "
+            "Install with: pip install huggingface_hub>=0.25.0"
+        ) from e
+
+
+# ---------------------------------------------------------------------------
+# InferenceClient (new Inference Providers API)
+# ---------------------------------------------------------------------------
+
+
+def inference_client_image_classification(
+    model_id: str,
+    image_bytes: bytes,
+    token: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Run image classification via InferenceClient. Returns [{label, score}]."""
+    client = get_inference_client(token)
+    result = client.image_classification(image_bytes, model=model_id)
+    return [
+        {"label": item.label, "score": float(item.score)}
+        for item in result
+    ]
+
+
+def inference_client_zero_shot_image_classification(
+    model_id: str,
+    image_bytes: bytes,
+    candidate_labels: List[str],
+    token: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Run zero-shot image classification via InferenceClient. Returns [{label, score}]."""
+    client = get_inference_client(token)
+    result = client.zero_shot_image_classification(
+        image_bytes,
+        candidate_labels=candidate_labels,
+        model=model_id,
+    )
+    return [
+        {"label": item.label, "score": float(item.score)}
+        for item in result
+    ]
+
+
+def inference_client_image_to_text(
+    model_id: str,
+    image_bytes: bytes,
+    token: Optional[str] = None,
+) -> str:
+    """Run image-to-text (captioning) via InferenceClient. Returns caption string."""
+    client = get_inference_client(token)
+    result = client.image_to_text(image_bytes, model=model_id)
+    if hasattr(result, "generated_text"):
+        return result.generated_text or ""
+    return str(result) if result else ""
+
+
+# ---------------------------------------------------------------------------
+# Legacy HTTP (HF Spaces / deprecated api-inference.huggingface.co)
+# ---------------------------------------------------------------------------
+
+
 def _wait_for_model(response_json: Any) -> float:
-    """Return the estimated wait time from a 'model loading' response, or 0."""
     if isinstance(response_json, dict):
         return float(response_json.get("estimated_time", _DEFAULT_COLD_WAIT))
     return _DEFAULT_COLD_WAIT
@@ -43,11 +116,7 @@ def post_image_binary(
     image_bytes: bytes,
     timeout: float = 120,
 ) -> Any:
-    """POST raw image bytes (image-classification, image-to-text).
-
-    Used for tasks where the Inference API accepts the image as the
-    request body (no JSON wrapping).
-    """
+    """POST raw image bytes (image-classification, image-to-text). Used for HF Spaces."""
     headers: Dict[str, str] = {"Content-Type": "application/octet-stream"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -83,11 +152,7 @@ def post_zero_shot_image(
     candidate_labels: List[str],
     timeout: float = 120,
 ) -> Any:
-    """POST a zero-shot image classification request.
-
-    The Inference API expects JSON with a base64-encoded image and
-    ``candidate_labels`` in ``parameters``.
-    """
+    """POST zero-shot image classification. Used for HF Spaces."""
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"

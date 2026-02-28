@@ -1,7 +1,8 @@
 """HuggingFace image-captioning provider.
 
-Supports both HF Inference API (``api-inference.huggingface.co``,
-image-to-text pipeline) and custom HF Spaces endpoints.
+Supports:
+- InferenceClient (model ID) - new Inference Providers API
+- HF Spaces (URL)
 """
 
 from __future__ import annotations
@@ -13,18 +14,18 @@ from typing import Any, Dict
 from shared.providers.base import BaseCaptioningProvider
 from shared.providers.types import CaptioningResult
 from shared.utils.http_client import get_http_session
-from shared.utils.hf_inference import post_image_binary
+from shared.utils.hf_inference import (
+    inference_client_image_to_text,
+    is_model_id,
+    post_image_binary,
+)
 from shared.utils.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
 
-def _is_inference_api(url: str) -> bool:
-    return "api-inference.huggingface.co" in url
-
-
 class HFCaptioningProvider(BaseCaptioningProvider):
-    """Image captioning via HF Inference API or a custom HF Space."""
+    """Image captioning via InferenceClient or HF Spaces."""
 
     def __init__(self) -> None:
         self._api_url: str = os.getenv(
@@ -32,12 +33,12 @@ class HFCaptioningProvider(BaseCaptioningProvider):
         )
         self._api_token: str | None = get_secret("HF_API_TOKEN")
         self._session = get_http_session()
-        self._use_inference_api = _is_inference_api(self._api_url)
+        self._use_inference_client = is_model_id(self._api_url)
 
         if not self._api_url:
             logger.warning("HF_CAPTIONING_API_URL / HF_API_URL not configured")
         else:
-            mode = "Inference API" if self._use_inference_api else "HF Space"
+            mode = "Inference Providers" if self._use_inference_client else "HF Space"
             logger.info("Captioning provider using %s: %s", mode, self._api_url)
 
     @property
@@ -48,16 +49,15 @@ class HFCaptioningProvider(BaseCaptioningProvider):
 
     def _call_api(self, image_bytes: bytes) -> str:
         """POST the image and return the generated caption text."""
-        if self._use_inference_api:
-            return self._call_inference_api(image_bytes)
+        if self._use_inference_client:
+            return self._call_inference_client(image_bytes)
         return self._call_spaces_api(image_bytes)
 
-    def _call_inference_api(self, image_bytes: bytes) -> str:
-        """HF Inference API: send raw bytes, get ``[{generated_text}]``."""
-        api_result = post_image_binary(
-            self._session, self._api_url, self._api_token, image_bytes,
+    def _call_inference_client(self, image_bytes: bytes) -> str:
+        """InferenceClient (Inference Providers API)."""
+        return inference_client_image_to_text(
+            self._api_url, image_bytes, self._api_token,
         )
-        return self._extract_caption(api_result)
 
     def _call_spaces_api(self, image_bytes: bytes) -> str:
         """Legacy HF Spaces: multipart form with ``file`` field."""

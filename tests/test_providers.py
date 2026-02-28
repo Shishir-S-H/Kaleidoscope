@@ -29,19 +29,19 @@ class TestProviderRegistry:
         assert provider.name == "huggingface"
 
 
-class TestModerationInferenceAPI:
-    """Test moderation provider with HF Inference API URL."""
+class TestModerationInferenceProviders:
+    """Test moderation provider with InferenceClient (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    def test_uses_inference_api_path(self, monkeypatch):
+    def test_uses_inference_client_path(self, monkeypatch):
         monkeypatch.setenv(
             "HF_MODERATION_API_URL",
-            "https://api-inference.huggingface.co/models/Falconsai/nsfw_image_detection",
+            "Falconsai/nsfw_image_detection",
         )
         provider = get_provider("moderation")
-        assert provider._use_inference_api is True
+        assert provider._use_inference_client is True
 
     def test_uses_spaces_path(self, monkeypatch):
         monkeypatch.setenv(
@@ -49,15 +49,15 @@ class TestModerationInferenceAPI:
             "https://my-space.hf.space/classify",
         )
         provider = get_provider("moderation")
-        assert provider._use_inference_api is False
+        assert provider._use_inference_client is False
 
-    @patch("shared.providers.huggingface.moderation.post_image_binary")
-    def test_inference_api_call(self, mock_post, monkeypatch):
+    @patch("shared.providers.huggingface.moderation.inference_client_image_classification")
+    def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_MODERATION_API_URL",
-            "https://api-inference.huggingface.co/models/Falconsai/nsfw_image_detection",
+            "Falconsai/nsfw_image_detection",
         )
-        mock_post.return_value = [
+        mock_inference.return_value = [
             {"label": "normal", "score": 0.95},
             {"label": "nsfw", "score": 0.05},
         ]
@@ -65,22 +65,22 @@ class TestModerationInferenceAPI:
         result = provider.analyze(b"fake-image-bytes")
         assert result.is_safe is True
         assert result.top_label == "normal"
-        mock_post.assert_called_once()
+        mock_inference.assert_called_once()
 
 
-class TestTaggerInferenceAPI:
-    """Test tagger provider with HF Inference API URL."""
+class TestTaggerInferenceProviders:
+    """Test tagger provider with InferenceClient (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    @patch("shared.providers.huggingface.tagger.post_zero_shot_image")
-    def test_inference_api_call(self, mock_post, monkeypatch):
+    @patch("shared.providers.huggingface.tagger.inference_client_zero_shot_image_classification")
+    def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_TAGGER_API_URL",
-            "https://api-inference.huggingface.co/models/openai/clip-vit-large-patch14",
+            "openai/clip-vit-large-patch14",
         )
-        mock_post.return_value = [
+        mock_inference.return_value = [
             {"label": "nature", "score": 0.8},
             {"label": "outdoor", "score": 0.6},
             {"label": "tree", "score": 0.4},
@@ -89,45 +89,45 @@ class TestTaggerInferenceAPI:
         result = provider.tag(b"fake-image-bytes", top_n=3)
         assert "nature" in result.tags
         assert len(result.tags) <= 3
-        mock_post.assert_called_once()
+        mock_inference.assert_called_once()
 
 
-class TestSceneInferenceAPI:
-    """Test scene provider with HF Inference API URL."""
+class TestSceneInferenceProviders:
+    """Test scene provider with InferenceClient (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    @patch("shared.providers.huggingface.scene.post_zero_shot_image")
-    def test_inference_api_call(self, mock_post, monkeypatch):
+    @patch("shared.providers.huggingface.scene.inference_client_zero_shot_image_classification")
+    def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_SCENE_API_URL",
-            "https://api-inference.huggingface.co/models/openai/clip-vit-large-patch14",
+            "openai/clip-vit-large-patch14",
         )
-        mock_post.return_value = [
+        mock_inference.return_value = [
             {"label": "beach", "score": 0.7},
             {"label": "outdoor", "score": 0.5},
         ]
         provider = get_provider("scene")
         result = provider.recognize(b"fake-image-bytes")
         assert result.scene == "beach"
-        mock_post.assert_called_once()
+        mock_inference.assert_called_once()
 
 
-class TestCaptioningInferenceAPI:
-    """Test captioning provider with HF Inference API URL."""
+class TestCaptioningInferenceProviders:
+    """Test captioning provider with InferenceClient (model ID)."""
 
     def setup_method(self):
         clear_cache()
 
-    @patch("shared.providers.huggingface.captioning.post_image_binary")
-    def test_inference_api_call(self, mock_post, monkeypatch):
+    @patch("shared.providers.huggingface.captioning.inference_client_image_to_text")
+    def test_inference_client_call(self, mock_inference, monkeypatch):
         monkeypatch.setenv(
             "HF_CAPTIONING_API_URL",
-            "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large",
+            "Salesforce/blip-image-captioning-large",
         )
-        mock_post.return_value = [{"generated_text": "a dog playing on a beach"}]
+        mock_inference.return_value = "a dog playing on a beach"
         provider = get_provider("captioning")
         result = provider.caption(b"fake-image-bytes")
         assert result.caption == "a dog playing on a beach"
-        mock_post.assert_called_once()
+        mock_inference.assert_called_once()
