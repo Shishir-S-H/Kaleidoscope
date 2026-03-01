@@ -60,6 +60,16 @@ python scripts/setup/clear_es_data.py
 
 **Note**: If Elasticsearch is in Docker and only bound to `127.0.0.1:9200`, run the script on the same host (e.g. after `ssh` into the server).
 
+**On the server (pull then clear in one go)**:
+
+```bash
+cd ~/Kaleidoscope/kaleidoscope-ai   # or your repo path
+chmod +x scripts/setup/run_clear_es_data_on_server.sh
+./scripts/setup/run_clear_es_data_on_server.sh
+```
+
+This pulls `origin/main` and runs `clear_es_data.sh`. Ensure `ELASTICSEARCH_PASSWORD` is in `.env` or exported before running.
+
 ---
 
 ## Related Documentation
