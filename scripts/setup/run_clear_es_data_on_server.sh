@@ -41,7 +41,13 @@ if [ -z "${ELASTICSEARCH_PASSWORD}" ]; then
   exit 1
 fi
 
-export ES_BASE_URL="${ES_BASE_URL:-http://localhost:9200}"
+# Use 127.0.0.1 on server so we hit the published ES port (Docker maps 9200 to host)
+export ES_BASE_URL="${ES_BASE_URL:-http://127.0.0.1:9200}"
+if curl -s -o /dev/null -w "%{http_code}" -u "elastic:${ELASTICSEARCH_PASSWORD}" --connect-timeout 5 "${ES_BASE_URL}/_cluster/health" | grep -q 200; then
+  echo "Elasticsearch reachable at $ES_BASE_URL"
+else
+  echo "Warning: Could not reach Elasticsearch at $ES_BASE_URL (will try anyway)"
+fi
 chmod +x "$SCRIPT_DIR/clear_es_data.sh"
 "$SCRIPT_DIR/clear_es_data.sh"
 
