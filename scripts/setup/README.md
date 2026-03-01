@@ -60,6 +60,8 @@ python scripts/setup/clear_es_data.py
 
 **Note**: If Elasticsearch is in Docker and only bound to `127.0.0.1:9200`, run the script on the same host (e.g. after `ssh` into the server).
 
+**Why does data come back?** The Spring Boot backend runs `ElasticsearchStartupSyncService` on every startup and re-syncs all data from PostgreSQL into the `posts`, `blogs`, `users`, `search_assets`, etc. indices. So after clearing, if the backend restarts, those indices will be repopulated. To keep ES empty you would need to either stop the backend or clear the source data in PostgreSQL as well.
+
 **On the server (pull then clear in one go)**:
 
 ```bash
