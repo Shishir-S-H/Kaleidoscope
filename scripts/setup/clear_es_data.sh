@@ -23,6 +23,8 @@ if [ -z "${ELASTICSEARCH_PASSWORD}" ]; then
   exit 1
 fi
 
+# AI / kaleidoscope-ai indices (ES sync worker)
+# Backend (Spring Boot) indices - startup sync repopulates these from PostgreSQL
 INDICES=(
   "media_search"
   "post_search"
@@ -31,6 +33,17 @@ INDICES=(
   "recommendations_knn"
   "feed_personalized"
   "known_faces_index"
+  "posts"
+  "blogs"
+  "users"
+  "search_assets"
+  "media_ai_insights"
+  "media_detected_faces"
+  "recommendations"
+  "user_face_embeddings"
+  "follows"
+  "feed_items"
+  "user_profiles"
 )
 
 echo "=============================================="
