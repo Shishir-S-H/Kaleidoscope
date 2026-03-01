@@ -120,8 +120,8 @@ class ElasticsearchSyncHandler:
             import psycopg2.pool
             
             self.pg_pool = psycopg2.pool.ThreadedConnectionPool(
-                minconn=2,
-                maxconn=10,
+                minconn=1,
+                maxconn=3,
                 host=DB_HOST,
                 port=DB_PORT,
                 database=DB_NAME,
@@ -129,16 +129,16 @@ class ElasticsearchSyncHandler:
                 password=DB_PASSWORD,
                 connect_timeout=10,
                 keepalives=1,
-                keepalives_idle=30,
-                keepalives_interval=10,
-                keepalives_count=5,
+                keepalives_idle=300,
+                keepalives_interval=30,
+                keepalives_count=3,
             )
             self.logger.info("PostgreSQL connection pool initialized", extra={
                 "host": DB_HOST,
                 "port": DB_PORT,
                 "database": DB_NAME,
-                "minconn": 2,
-                "maxconn": 10,
+                "minconn": 1,
+                "maxconn": 3,
             })
         except ImportError:
             self.logger.error("psycopg2 package not installed. Run: pip install psycopg2-binary")
@@ -153,38 +153,13 @@ class ElasticsearchSyncHandler:
     
     def _ensure_postgresql_connection(self) -> bool:
         """
-        Ensure PostgreSQL connection pool is available, recreating it if needed.
-        
-        Returns:
-            True if pool is available, False otherwise
+        Ensure PostgreSQL connection pool is available, recreating if closed.
+        Avoids SELECT 1 on every call to reduce Neon DB compute usage.
         """
         if self.pg_pool is None or self.pg_pool.closed:
             self.logger.warning("PostgreSQL pool is unavailable, attempting to recreate...")
             self._init_postgresql()
-            return self.pg_pool is not None and not self.pg_pool.closed
-
-        # Validate the pool by borrowing and returning a connection
-        conn = None
-        try:
-            conn = self.pg_pool.getconn()
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-            return True
-        except Exception as e:
-            self.logger.warning("PostgreSQL pool health-check failed: %s. Recreating pool...", e)
-            try:
-                self.pg_pool.closeall()
-            except Exception:
-                pass
-            self._init_postgresql()
-            return self.pg_pool is not None and not self.pg_pool.closed
-        finally:
-            if conn is not None and self.pg_pool is not None:
-                try:
-                    self.pg_pool.putconn(conn)
-                except Exception:
-                    pass
+        return self.pg_pool is not None and not self.pg_pool.closed
     
     def read_from_postgresql(self, table_name: str, document_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -750,12 +725,24 @@ def main():
         )
         mark_ready()
         
+        def _deduplicate_batch(actions: list) -> list:
+            """Keep only the latest action per (index, id) pair to avoid redundant DB reads."""
+            seen = {}
+            for action in actions:
+                key = (action["index"], action["id"])
+                seen[key] = action
+            deduped = list(seen.values())
+            if len(deduped) < len(actions):
+                LOGGER.info("Deduplicated batch: %d -> %d actions", len(actions), len(deduped))
+            return deduped
+
         def _flush_batch():
             nonlocal batch_actions, batch_start
             if not batch_actions:
                 return
-            LOGGER.info("Flushing batch", extra={"size": len(batch_actions)})
-            sync_handler.sync_batch(batch_actions)
+            deduped = _deduplicate_batch(batch_actions)
+            LOGGER.info("Flushing batch", extra={"size": len(deduped)})
+            sync_handler.sync_batch(deduped)
             batch_actions = []
             batch_start = time.time()
 
