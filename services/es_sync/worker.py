@@ -645,8 +645,26 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         
         table_name, es_index_name = mapping
         
+        document_data_raw = decoded_data.get("documentData")
+
         if operation == "delete":
             success = sync_handler.delete_document(es_index_name, document_id)
+        elif document_data_raw:
+            # Direct embedding path: full document payload is in the message.
+            # Used by profile_enrollment to avoid a PostgreSQL round-trip.
+            try:
+                es_document = json.loads(document_data_raw)
+            except (json.JSONDecodeError, TypeError) as exc:
+                LOGGER.error("Invalid documentData JSON", extra={
+                    "error": str(exc),
+                    "document_id": document_id
+                })
+                return
+            for field in ["embedding", "imageEmbedding", "textEmbedding",
+                          "faceEmbedding", "face_embedding"]:
+                if field in es_document:
+                    es_document[field] = parse_vector_field(es_document[field])
+            success = sync_handler.sync_document(es_index_name, document_id, es_document)
         else:
             pg_data = sync_handler.read_from_postgresql(table_name, document_id)
             

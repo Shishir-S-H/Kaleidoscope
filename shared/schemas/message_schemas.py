@@ -84,6 +84,7 @@ class ESSyncEventMessage(BaseModel):
     indexType: str
     documentId: str
     operation: Optional[str] = "index"
+    documentData: Optional[str] = None
     version: Optional[str] = None
 
 

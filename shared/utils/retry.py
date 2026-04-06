@@ -104,7 +104,7 @@ def publish_to_dlq(
         dlq_message = {
             "originalMessageId": original_message_id,
             "originalData": original_data,
-            "service": service_name,
+            "serviceName": service_name,
             "error": str(error),
             "errorType": type(error).__name__,
             "retryCount": str(retry_count),
@@ -118,7 +118,7 @@ def publish_to_dlq(
             extra={
                 "dlq_stream": dlq_stream,
                 "original_message_id": original_message_id,
-                "service": service_name,
+                "serviceName": service_name,
                 "retry_count": retry_count,
                 "error": str(error)
             }

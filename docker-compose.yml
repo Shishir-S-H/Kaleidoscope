@@ -7,12 +7,14 @@ services:
     volumes:
       - ./services/content_moderation:/app
       - ./shared:/app/shared
+      - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
       - ./shared/env_templates/content_moderation.env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
     depends_on:
       - redis
     healthcheck:
@@ -32,12 +34,14 @@ services:
     volumes:
       - ./services/image_tagger:/app
       - ./shared:/app/shared
+      - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
       - ./shared/env_templates/image_tagger.env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
     depends_on:
       - redis
     healthcheck:
@@ -57,12 +61,14 @@ services:
     volumes:
       - ./services/scene_recognition:/app
       - ./shared:/app/shared
+      - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
       - ./shared/env_templates/scene_recognition.env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
     depends_on:
       - redis
     healthcheck:
@@ -82,12 +88,14 @@ services:
     volumes:
       - ./services/image_captioning:/app
       - ./shared:/app/shared
+      - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
       - ./shared/env_templates/image_captioning.env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
     depends_on:
       - redis
     healthcheck:
@@ -158,11 +166,13 @@ services:
     volumes:
       - ./services/face_recognition:/app
       - ./shared:/app/shared
+      - ./local_media_cache:/tmp/kaleidoscope_media
     env_file:
       - ./shared/env_templates/face_recognition.env
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
     depends_on:
       - redis
     restart: always
@@ -309,6 +319,50 @@ services:
   #       max-file: "3"
 
   # RabbitMQ removed - using Redis Streams instead
+
+  # ---------------------------------------------------------------------------
+  # Phase 2-4 event-driven workers
+  # ---------------------------------------------------------------------------
+
+  media_preprocessor:
+    build:
+      context: .
+      dockerfile: services/media_preprocessor/Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./local_media_cache:/tmp/kaleidoscope_media
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  federated_aggregator:
+    build:
+      context: .
+      dockerfile: services/federated_aggregator/Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:alpine

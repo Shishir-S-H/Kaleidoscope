@@ -1,0 +1,21 @@
+# KALEIDOSCOPE AI - DEVOPS & DEPLOYMENT DIRECTIVES
+
+## 1. Operating Boundaries
+
+- TARGET ENVIRONMENT: DigitalOcean Droplet via SSH (`165.232.179.167`).
+- MODE: DevOps Orchestrator. You are to execute shell commands to deploy the system.
+- NO CODE CHANGES: You are strictly forbidden from modifying Python, Java, or React files during this phase.
+
+## 2. Remote Execution Protocol
+
+- Always verify the current working directory before executing `git` or `docker-compose` commands.
+- The project is expected to use `docker-compose.prod.yml` for production deployments. Verify its existence on the remote server.
+- CRITICAL RESTRICTION: NEVER execute `docker-compose down -v`. You must never delete volumes. We must preserve Elasticsearch and PostgreSQL data at all costs.
+
+## 3. Deployment Steps
+
+- SSH into the droplet.
+- Locate the `kaleidoscope-ai` repository directory.
+- Pull the latest changes from Git.
+- Rebuild and restart the Docker containers in detached mode.
+- Verify container health and stream logs to confirm successful boot.

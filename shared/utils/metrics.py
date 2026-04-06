@@ -2,7 +2,6 @@
 Metrics utility for AI services - tracks processing latency, success rates, and health.
 """
 
-import time
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -58,12 +57,6 @@ def record_failure(error: Optional[str] = None):
         _metrics["last_error_at"] = datetime.utcnow().isoformat() + "Z"
         if error:
             _metrics["last_error"] = error
-
-
-def record_retry():
-    """Record a retry attempt."""
-    with _metrics_lock:
-        _metrics["retry_count"] += 1
 
 
 def record_dlq():
@@ -144,21 +137,4 @@ def reset_metrics():
         _metrics["last_error_at"] = None
         _metrics["last_error"] = None
 
-
-class ProcessingTimer:
-    """Context manager for measuring processing time."""
-    
-    def __init__(self):
-        self.start_time = None
-        self.end_time = None
-    
-    def __enter__(self):
-        self.start_time = time.time()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.end_time = time.time()
-        processing_time = self.end_time - self.start_time
-        record_processing_time(processing_time)
-        return False  # Don't suppress exceptions
 

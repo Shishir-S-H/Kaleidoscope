@@ -4,30 +4,6 @@ import json
 from typing import Dict, Any
 
 
-def encode_message(data: Dict[str, Any]) -> Dict[str, str]:
-    """
-    Encode a message dictionary for Redis Streams.
-    Converts complex types (lists, dicts) to JSON strings.
-    
-    Args:
-        data: Dictionary of data to encode
-    
-    Returns:
-        Dictionary with all values as strings
-    """
-    encoded = {}
-    for key, value in data.items():
-        if isinstance(value, (list, dict)):
-            encoded[key] = json.dumps(value)
-        elif isinstance(value, bool):
-            encoded[key] = "true" if value else "false"
-        elif value is None:
-            encoded[key] = ""
-        else:
-            encoded[key] = str(value)
-    return encoded
-
-
 def decode_message(data: Dict[bytes, bytes]) -> Dict[str, Any]:
     """
     Decode a message from Redis Streams.

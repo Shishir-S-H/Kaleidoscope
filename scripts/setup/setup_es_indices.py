@@ -13,7 +13,7 @@ from elasticsearch.exceptions import RequestError
 
 # Configuration
 ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
-MAPPINGS_DIR = Path(__file__).parent.parent / "es_mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "es_mappings"
 
 # Index names
 INDICES = [

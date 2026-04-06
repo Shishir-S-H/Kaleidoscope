@@ -131,13 +131,75 @@ services:
   # AI Services Layer (Depend on Redis)
   # ============================================
 
-  content_moderation:
-    # Pull from Docker Hub (shishir01 registry)
-    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-content_moderation:latest
-    container_name: content_moderation
+  media_preprocessor:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-media_preprocessor:latest
+    container_name: media_preprocessor
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  profile_enrollment:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-profile_enrollment:latest
+    container_name: profile_enrollment
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - HF_FACE_API_URL=${HF_FACE_API_URL}
+      - HF_API_TOKEN=${HF_API_TOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  face_matcher:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_matcher:latest
+    container_name: face_matcher
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
+      - KNN_CONFIDENCE_THRESHOLD=${KNN_CONFIDENCE_THRESHOLD:-0.85}
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  content_moderation:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-content_moderation:latest
+    container_name: content_moderation
+    restart: always
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - HF_API_URL=${HF_API_URL_CONTENT_MODERATION}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
@@ -155,8 +217,11 @@ services:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_tagger:latest
     container_name: image_tagger
     restart: always
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - HF_API_URL=${HF_API_URL_IMAGE_TAGGER}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
@@ -174,8 +239,11 @@ services:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-scene_recognition:latest
     container_name: scene_recognition
     restart: always
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - HF_API_URL=${HF_API_URL_SCENE_RECOGNITION}
       - HF_API_TOKEN=${HF_API_TOKEN}
       - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
@@ -194,8 +262,11 @@ services:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_captioning:latest
     container_name: image_captioning
     restart: always
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - HF_API_URL=${HF_API_URL_IMAGE_CAPTIONING}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
@@ -213,8 +284,11 @@ services:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_recognition:latest
     container_name: face_recognition
     restart: always
+    volumes:
+      - local_media_cache:/tmp/kaleidoscope_media
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - HF_API_URL=${HF_API_URL_FACE_RECOGNITION}
       - HF_API_TOKEN=${HF_API_TOKEN}
     depends_on:
@@ -309,5 +383,6 @@ networks:
 volumes:
   redis-data:
   es-data:
+  local_media_cache:
   certbot-etc: # Volume for Certbot certificates
   certbot-www: # Volume for Certbot challenge files

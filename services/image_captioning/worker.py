@@ -22,18 +22,15 @@ from shared.utils.metrics import (
 )
 from shared.utils.health import check_health
 from shared.providers.registry import get_provider
-from shared.utils.image_downloader import download_image
-from shared.utils.http_client import get_http_session, close_http_session
-from shared.utils.url_validator import validate_url, URLValidationError
 from shared.utils.health_server import start_health_server, mark_ready
 
 LOGGER = get_logger("image-captioning")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-STREAM_INPUT = "post-image-processing"
+STREAM_INPUT = "ml-inference-tasks"
 STREAM_OUTPUT = "ml-insights-results"
 STREAM_DLQ = "ai-processing-dlq"
-CONSUMER_GROUP = "image-captioning-group"
+CONSUMER_GROUP = "image-captioning-ml-group"
 CONSUMER_NAME = "image-captioning-worker-1"
 
 shutdown_event = threading.Event()
@@ -52,24 +49,22 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         decoded_data = decode_message(data)
         media_id = int(decoded_data.get("mediaId", 0))
         post_id = int(decoded_data.get("postId", 0))
-        media_url = decoded_data.get("mediaUrl", "")
+        local_file_path = decoded_data.get("localFilePath", "")
         correlation_id = decoded_data.get("correlationId", "")
 
         LOGGER.info("Received captioning job", extra={
             "message_id": message_id,
             "media_id": media_id,
             "post_id": post_id,
-            "media_url": media_url,
+            "local_file_path": local_file_path,
             "correlation_id": correlation_id,
         })
 
-        if not media_id or not media_url:
+        if not media_id or not local_file_path:
             LOGGER.error("Invalid message format", extra={"data": decoded_data})
             return
 
-        validate_url(media_url)
-        session = get_http_session()
-        image_bytes = download_image(media_url, session, correlation_id=correlation_id)
+        image_bytes = open(local_file_path, "rb").read()
 
         provider = get_provider("captioning")
         result = provider.caption(image_bytes)
@@ -160,7 +155,6 @@ def main():
             consumer.close()
         if publisher:
             publisher.close()
-        close_http_session()
         LOGGER.info("Worker shut down complete")
 
 
