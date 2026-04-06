@@ -1,20 +1,19 @@
-# KALEIDOSCOPE AI - DEVOPS & DEPLOYMENT DIRECTIVES
+# KALEIDOSCOPE AI - ENTERPRISE DOCUMENTATION & CONSOLIDATION DIRECTIVES
 
 ## 1. Operating Boundaries
 
-- TARGET ENVIRONMENT: DigitalOcean Droplet via SSH (`165.232.179.167`).
-- MODE: DevOps Orchestrator. You are to execute shell commands to deploy the system.
-- NO CODE CHANGES: You are strictly forbidden from modifying Python, Java, or React files during this phase.
+- TARGET ENVIRONMENT: Local Workspace (Both `Kaleidoscope` core repo and `kaleidoscope-ai` repo).
+- OPERATING MODE: Lead Technical Writer & Enterprise Architect.
+- STRICT RESTRICTION: You are absolutely FORBIDDEN from modifying, proposing changes to, or deleting any application code (Java, Python, TS/JS, SQL, Dockerfiles). You may only modify Markdown (`.md`) files.
 
-## 2. Remote Execution Protocol
+## 2. Audit & Consolidation Mandate
 
-- Always verify the current working directory before executing `git` or `docker-compose` commands.
-- The project is expected to use `docker-compose.prod.yml` for production deployments. Verify its existence on the remote server.
+- CROSS-REPO VERIFICATION: You must quickly scan the current state of both repositories to ensure you understand the final deployed architecture (e.g., Java handling consent, Python exclusively handling vector ES indices).
+- DE-DUPLICATION: You must analyze the legacy `kaleidoscope-ai/docs/` folder against the newly created `documentation/` folder.
+- SINGLE SOURCE OF TRUTH: All accurate, historical, and architectural documentation must be consolidated into a single `documentation/` folder. The legacy `docs/` folder must be completely safely eliminated.
 
-## 3. Deployment Steps
+## 3. Execution Style
 
-- SSH into the droplet.
-- Locate the `kaleidoscope-ai` repository directory.
-- Pull the latest changes from Git.
-- Rebuild and restart the Docker containers in detached mode.
-- Verify container health and stream logs to confirm successful boot.
+- Read thoroughly before deleting. If `docs/` contains valuable setup guides or API notes that aren't in `documentation/`, you must merge that information first.
+- Keep diagrams (Mermaid) intact and ensure formatting is highly professional.
+- Ensure the root `README.md` files point clearly to the new `documentation/` directory.

@@ -348,3 +348,38 @@ quadrantChart
 | Task | Detail | Owner |
 |------|--------|-------|
 | Migrate ML workers from `post-image-processing` → `ml-inference-tasks` | Update `STREAM_INPUT` in all 5 ML workers; replace URL download with `open(localFilePath, "rb")` read | Python AI |
+
+---
+
+## 8. Python AI Layer — Internal Tech Debt
+
+These items are scoped entirely within `kaleidoscope-ai` (no cross-layer contract impact).
+
+### Open Items
+
+| ID | Severity | Description | Location |
+|----|---------|-------------|----------|
+| TD-1 | High | `media_preprocessor` publishes pre-downloaded images to `ml-inference-tasks` but all five ML workers still consume from `post-image-processing` and independently re-download each image from Cloudinary — 5× redundant network fetches per media item; `ml-inference-tasks` fills with unread messages | `services/{content_moderation,image_tagger,scene_recognition,image_captioning,face_recognition}/worker.py` |
+| TD-9 | Low | The producer of `post-aggregation-trigger` is not visible in this repo — believed to be the Java backend. If the trigger source changes, `post_aggregator` has no fallback timeout | `services/post_aggregator/worker.py` |
+| TD-10 | Low | `shared/utils/logger.py` uses `datetime.utcnow()` which is deprecated in Python 3.12+; should migrate to `datetime.now(timezone.utc)` | `shared/utils/logger.py` |
+
+**TD-1 resolution path:**
+1. Update each ML worker's `STREAM_INPUT` constant from `"post-image-processing"` to `"ml-inference-tasks"`.
+2. Replace URL-download logic with `open(localFilePath, "rb").read()`.
+3. Update `CONSUMER_GROUP` constants accordingly.
+4. Verify `./local_media_cache:/tmp/kaleidoscope_media` volume mount is present for each ML worker in `docker-compose.yml`.
+
+### Resolved Items (April 2026)
+
+| ID | Severity | Description | Resolution |
+|----|---------|-------------|------------|
+| TD-2 | Medium | `shared/__init__.py` imported from non-existent `shared.models`, silently failing on every startup | Replaced with empty namespace comment |
+| TD-3 | Medium | `shared/utils/worker_base.py` (`BaseWorker`) and `shared/utils/prometheus_exporter.py` were defined but never imported anywhere | Deleted both files |
+| TD-4 | Medium | `shared/db/models.py` contained SQLAlchemy ORM models never imported; `pgvector` absent from all `requirements.txt` | Deleted file and `shared/db/` directory |
+| TD-5 | Low | `shared/utils/metrics.py` — `ProcessingTimer` class and `record_retry()` function were never called | Deleted both symbols |
+| TD-6 | Low | `shared/redis_streams/utils.py` — `encode_message()` was never imported | Deleted function |
+| TD-7 | Low | `scripts/setup/setup_es_indices.py` `MAPPINGS_DIR` resolved to `scripts/es_mappings/` (non-existent) instead of repo-root `es_mappings/` | Fixed path to `Path(__file__).resolve().parents[2] / "es_mappings"` |
+| TD-8 | Low | `docker-compose.yml` declared orphaned volumes `pgdata`, `minio_data`, `pgadmin_data` whose services were commented out | Deleted all three orphaned volume declarations |
+| TD-11 | Medium | `services/es_sync/worker.py` `INDEX_MAPPING` contained `post_search`, `user_search`, `media_search` — indices owned by the Java layer — creating ambiguous write ownership | Removed Java-owned indices from Python `INDEX_MAPPING` |
+| TD-12 | Low | `services/es_sync/worker.py` had a dead `documentData` direct-embed branch from the retired `profile_enrollment → es-sync-queue` path (GAP-2 fix routed profile enrollment to Java) | Removed unreachable branch |
+| TD-13 | Low | `services/edge-media/` (`ConsentMiddleware`) was a Starlette service not present in any compose file; consent is Java's responsibility | Deleted directory |

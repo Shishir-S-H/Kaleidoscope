@@ -15,7 +15,10 @@
 5. [Elasticsearch Index Inventory](#5-elasticsearch-index-inventory)
 6. [Infrastructure Services](#6-infrastructure-services)
 7. [Shared Library Overview](#7-shared-library-overview)
-8. [Health & Observability](#8-health--observability)
+8. [Provider Abstraction Layer](#8-provider-abstraction-layer)
+9. [Health & Observability](#9-health--observability)
+10. [Security Model](#10-security-model)
+11. [Five-Phase Build History](#11-five-phase-build-history)
 
 ---
 
@@ -248,6 +251,15 @@ The `es_sync` worker reads from PostgreSQL read-model tables and indexes into El
 - `face_embedding`: `dense_vector`, `dims: 1024`, `similarity: cosine`, indexed for KNN  
 - `is_active`: boolean filter applied at query time to exclude deactivated profiles
 
+**Elasticsearch index domain ownership** — write authority is split between layers:
+
+| Layer | Owns | Write Mechanism |
+|-------|------|-----------------|
+| Java (Spring Boot) | `post_search`, `user_search`, `media_search`, `blog_search` | `ElasticsearchStartupSyncService` (bulk on startup) + incremental Spring Data ES saves |
+| Python `es_sync` | `face_search`, `recommendations_knn`, `feed_personalized`, `known_faces_index` | `es-sync-queue` consumer → reads PostgreSQL read-model → Elasticsearch bulk API |
+
+Only the Python-owned indices are ever written by the `es_sync` worker. The Java-owned indices are managed exclusively by the Java Spring Boot layer. This split is enforced in `services/es_sync/worker.py` via `INDEX_MAPPING`.
+
 ---
 
 ## 6. Infrastructure Services
@@ -277,37 +289,67 @@ All Python workers import from `shared/` via a bind-mount at `/app/shared`.
 
 ```
 shared/
+├── __init__.py               # Empty namespace
+├── requirements.txt          # redis, pydantic, python-dotenv, psycopg2-binary, elasticsearch
 ├── redis_streams/
-│   ├── publisher.py        # RedisStreamPublisher (XADD, pipeline batch)
-│   ├── consumer.py         # RedisStreamConsumer (XREADGROUP, XACK, XCLAIM)
-│   └── utils.py            # decode_message() — bytes→str + JSON parse
+│   ├── publisher.py          # RedisStreamPublisher (XADD, pipeline batch)
+│   ├── consumer.py           # RedisStreamConsumer (XREADGROUP, XACK, XCLAIM)
+│   └── utils.py              # decode_message() — bytes→str + JSON parse
 ├── schemas/
-│   ├── schemas.py          # Strict Pydantic v2 DTOs — Java contract mirrors
-│   └── message_schemas.py  # Wire schemas + validate_incoming/validate_outgoing
+│   ├── schemas.py            # Strict Pydantic v2 DTOs — Java contract mirrors
+│   └── message_schemas.py    # Wire schemas + validate_incoming/validate_outgoing
 ├── providers/
-│   ├── base.py             # Abstract base classes per AI task
-│   ├── registry.py         # get_provider() factory
-│   ├── types.py            # Result dataclasses (ModerationResult, FaceResult, …)
-│   └── huggingface/        # HF concrete implementations
+│   ├── base.py               # Abstract base classes per AI task
+│   ├── registry.py           # get_provider() factory + auto-register defaults
+│   ├── types.py              # Result dataclasses (ModerationResult, TaggingResult, …)
+│   └── huggingface/          # Concrete HF provider implementations
+│       ├── moderation.py
+│       ├── tagger.py
+│       ├── scene.py
+│       ├── captioning.py
+│       └── face.py
 └── utils/
-    ├── circuit_breaker.py  # CircuitBreaker (5 failures → OPEN for 60 s)
-    ├── health.py           # check_health() — metrics-threshold evaluation
-    ├── health_server.py    # GET /health · /ready · /metrics on port 8080
-    ├── image_downloader.py # download_image() with retry + exponential backoff
-    ├── logger.py           # get_logger() — structured JSON output
-    ├── metrics.py          # Thread-safe counters; p50/p95/p99 latency window
-    ├── retry.py            # retry_with_backoff + publish_to_dlq()
-    ├── secrets.py          # Docker Swarm secrets + env-var fallback
-    └── url_validator.py    # validate_url() — scheme check + SSRF prevention
+    ├── circuit_breaker.py    # CircuitBreaker (CLOSED/OPEN/HALF_OPEN, 5 fail → OPEN 60 s)
+    ├── health.py             # check_health() — metrics-threshold evaluation
+    ├── health_server.py      # GET /health · /ready · /metrics on HEALTH_PORT (default 8080)
+    ├── hf_inference.py       # InferenceClient + legacy HTTP helpers for HF API
+    ├── http_client.py        # get_http_session() — singleton requests.Session
+    ├── image_downloader.py   # download_image() with retry + exponential backoff
+    ├── logger.py             # get_logger() — structured JSON output
+    ├── metrics.py            # Thread-safe counters; p50/p95/p99 latency window
+    ├── retry.py              # retry_with_backoff + publish_to_dlq()
+    ├── secrets.py            # Docker Swarm secrets + env-var fallback
+    └── url_validator.py      # validate_url() — scheme check + SSRF prevention
 ```
-
-**Provider abstraction:** Set `AI_PLATFORM=<platform>` (or `<TASK>_PLATFORM`) to swap inference backends without changing worker code. HuggingFace supports both the new `InferenceClient` (model IDs) and legacy HTTP/Spaces URLs transparently.
 
 ---
 
-## 8. Health & Observability
+## 8. Provider Abstraction Layer
 
-Every Python worker exposes an HTTP health server on `HEALTH_PORT` (default `8080`):
+AI model calls are isolated behind abstract base classes in `shared/providers/base.py`. Each AI task has four components:
+
+1. A **base class** (`BaseModerationProvider`, `BaseTaggingProvider`, etc.) with a mandatory `analyze()` / `tag()` / `detect()` method signature.
+2. A **result dataclass** (`ModerationResult`, `TaggingResult`, `SceneResult`, `CaptionResult`, `FaceResult`) in `shared/providers/types.py`.
+3. A **HuggingFace concrete implementation** in `shared/providers/huggingface/` for each task.
+4. A **registry** (`shared/providers/registry.py`) that maps `(task, platform)` → class and caches singleton instances.
+
+**Switching inference backends** requires only:
+1. Setting `AI_PLATFORM=<platform>` (applies to all tasks) or `<TASK>_PLATFORM=<platform>` (per-task override).
+2. Registering a new provider class via `ProviderRegistry.register(task, platform, cls)`.
+3. No changes to any worker code.
+
+**HuggingFace dual-mode support** (transparent to worker code):
+
+| `HF_*_API_URL` value | Backend used |
+|---------------------|-------------|
+| A model ID (`org/model-name`) | `huggingface_hub.InferenceClient` (new Inference Providers API) |
+| A full `https://` URL | Direct HTTP POST (HuggingFace Spaces or self-hosted) |
+
+---
+
+## 9. Health & Observability
+
+Every Python worker exposes an HTTP health server on `HEALTH_PORT` (default `8080`). Set a unique port per service in `docker-compose.yml` to avoid conflicts:
 
 | Endpoint | Probe Type | Behaviour |
 |----------|-----------|-----------|
@@ -325,3 +367,58 @@ Every Python worker exposes an HTTP health server on `HEALTH_PORT` (default `808
 | Any messages in DLQ | Warning |
 
 All log lines are structured JSON and include: `timestamp`, `level`, `logger`, `message`, `source` (file / line / function), `process`, and optional `extra` context. Compatible with Loki, CloudWatch, Datadog, and any JSON-log aggregator.
+
+---
+
+## 10. Security Model
+
+| Concern | Implementation |
+|---------|---------------|
+| Consent enforcement | Handled upstream by the Java backend before events are published to Redis Streams; no Python service inspects a consent field |
+| SSRF prevention | `validate_url()` in `shared/utils/url_validator.py` resolves the hostname and rejects private / loopback / link-local IPs before any download attempt |
+| Image domain allowlist | `ALLOWED_IMAGE_DOMAINS` env var; defaults to `res.cloudinary.com`. Requests to unlisted domains are rejected with a logged warning |
+| Redis auth | `requirepass` set in `docker-compose.yml`; all workers supply `REDIS_PASSWORD` via the env / Docker Swarm secret |
+| Elasticsearch auth | Basic auth (`elastic` / `ELASTICSEARCH_PASSWORD`) injected into the `ES_HOST` URL at compose time |
+| Secrets management | `get_secret()` in `shared/utils/secrets.py` — checks `/run/secrets/<name>` (Docker Swarm) before falling back to environment variables; never hard-codes credentials |
+| HuggingFace token | Loaded exclusively via `get_secret("HF_API_TOKEN")` |
+| Circuit breaker | `shared/utils/circuit_breaker.py` — 5 consecutive failures → OPEN state for 60 s; prevents cascade failures to HuggingFace or Elasticsearch |
+
+---
+
+## 11. Five-Phase Build History
+
+A chronological record of how the `kaleidoscope-ai` layer was assembled. Useful context for understanding why certain services exist (or were retired).
+
+### Phase 1 — Core Redis Stream Infrastructure
+- Built `shared/redis_streams/` (`RedisStreamPublisher`, `RedisStreamConsumer`).
+- Established consumer-group semantics: `XREADGROUP` + `XACK`, automatic group creation, pending-message reclaim via `XCLAIM`.
+- Defined the canonical Pydantic DTOs in `shared/schemas/schemas.py` mirroring Java backend contracts.
+
+### Phase 2 — Consent Enforcement (Retired Python Service)
+- Originally housed `services/consent_gateway/worker.py` which routed events by a `hasConsent` flag.
+- **Retired in Phase C:** Consent is now enforced upstream by the Java backend before any event reaches Redis Streams. The `consent_gateway` Python service has been deleted and the `hasConsent` field removed from all Python DTOs (`PostImageEventDTO` GAP-6 fix). No Python worker inspects consent headers.
+
+### Phase 3 — ML Inference Workers (Fan-Out Pattern)
+- Built five parallel inference workers, each operating as an independent consumer group on `post-image-processing`:
+  - `content_moderation` — NSFW/safety classification via HuggingFace.
+  - `image_tagger` — Zero-shot semantic tagging.
+  - `scene_recognition` — Zero-shot scene classification.
+  - `image_captioning` — Image-to-text captioning.
+  - `face_recognition` — Face detection + embedding extraction.
+- Built `shared/providers/` abstraction layer so inference backends are swappable via `AI_PLATFORM` env var (see Section 8).
+
+### Phase 4 — Aggregation, Persistence & Resilience
+- Built `services/post_aggregator/worker.py`: waits for all media in a post to complete ML processing, then publishes a merged `PostInsightsEnrichedMessage` to `post-insights-enriched`.
+- Built `services/es_sync/worker.py`: consumes `es-sync-queue` and writes structured documents to Elasticsearch 8.x (ML/vector indices only — see Section 5 domain ownership).
+- Built `services/dlq_processor/worker.py`: monitors `ai-processing-dlq`; supports configurable auto-retry via `DLQ_AUTO_RETRY` env var.
+- Added circuit breaker, exponential-backoff retry, SSRF-prevention URL validation, and Docker-secrets-aware secret loading to `shared/utils/`.
+
+### Phase 5 — Media Pre-processing & Federated Learning
+- Built `services/media_preprocessor/worker.py`: downloads images from Cloudinary URLs to a shared Docker volume (`/tmp/kaleidoscope_media`), then publishes `LocalMediaEventDTO` to `ml-inference-tasks` to avoid redundant network fetches by downstream ML workers.
+
+  > **Note (TD-1):** The migration is half-complete — ML workers still consume from `post-image-processing` and download images independently. See `audit_report_and_tech_debt.md` § Python Internal Tech Debt.
+
+- Built `services/federated_aggregator/worker.py`: averages gradient payloads from edge nodes (`federated-gradient-updates`) and publishes global model state to `global-model-state`.
+- Built the face auto-tagging pipeline:
+  - `profile_enrollment`: extracts 1024-dim face embeddings from profile pictures and routes them to Java via `user-profile-face-embedding-results` (GAP-2 fix — was incorrectly publishing to `es-sync-queue`).
+  - `face_matcher`: runs KNN searches against `known_faces_index` in Elasticsearch for each detected face and publishes matches to `face-recognition-results` (GAP-1/GAP-3 fix — was publishing to the non-existent `face-tag-suggestions` stream).
