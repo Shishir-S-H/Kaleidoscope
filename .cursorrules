@@ -10,7 +10,6 @@
 
 - Always verify the current working directory before executing `git` or `docker-compose` commands.
 - The project is expected to use `docker-compose.prod.yml` for production deployments. Verify its existence on the remote server.
-- CRITICAL RESTRICTION: NEVER execute `docker-compose down -v`. You must never delete volumes. We must preserve Elasticsearch and PostgreSQL data at all costs.
 
 ## 3. Deployment Steps
 

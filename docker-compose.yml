@@ -434,8 +434,5 @@ services:
   #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
 
 volumes:
-  pgdata:
-  minio_data:
-  pgadmin_data:
   redis-data:
   es-data:

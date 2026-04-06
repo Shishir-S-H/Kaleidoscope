@@ -1,13 +1,13 @@
 """End-to-End integration tests for the Kaleidoscope AI pipeline.
 
 These tests connect to a LIVE Redis instance and verify the real event flow
-across the distributed Docker microservices (consent_gateway,
-media_preprocessor, federated_aggregator).
+across the distributed Docker microservices (media_preprocessor,
+federated_aggregator).
 
 Prerequisites
 -------------
 - Docker Compose stack is running:
-    docker compose up consent_gateway media_preprocessor federated_aggregator redis
+    docker compose up media_preprocessor federated_aggregator redis
 
 Run command
 -----------
@@ -132,58 +132,17 @@ class TestE2EPipeline:
     """Live end-to-end tests that exercise the full Docker microservice pipeline."""
 
     # ------------------------------------------------------------------
-    # Test 1 — Privacy Enforcement (hasConsent = false)
+    # Test 1 — Media Preprocessor Flow
     # ------------------------------------------------------------------
 
-    def test_privacy_enforcement_no_consent(self, redis_client):
-        """An event with hasConsent=false must arrive on privacy-audit-queue.
-
-        Flow: post-image-processing → consent_gateway → privacy-audit-queue
-        """
-        corr_id = f"e2e-privacy-{uuid.uuid4().hex[:8]}"
-        output_stream = "privacy-audit-queue"
-
-        # Record the stream tip BEFORE publishing so we only read new messages
-        watermark = _get_stream_tip(redis_client, output_stream)
-
-        redis_client.xadd(
-            "post-image-processing",
-            {
-                "postId": "e2e-post-privacy",
-                "mediaId": f"e2e-media-{corr_id}",
-                "imageUrl": PUBLIC_IMAGE_URL,
-                "correlationId": corr_id,
-                "hasConsent": "false",
-            },
-        )
-
-        result = poll_stream(
-            redis_client,
-            output_stream,
-            watermark,
-            corr_id,
-            timeout=8.0,
-        )
-
-        assert result is not None, (
-            f"Timed out waiting for correlationId={corr_id!r} on {output_stream!r}. "
-            "Is the consent_gateway container running?"
-        )
-        assert result.get("correlationId") == corr_id
-
-    # ------------------------------------------------------------------
-    # Test 2 — Media Preprocessor Flow (hasConsent = true)
-    # ------------------------------------------------------------------
-
-    def test_media_preprocessor_flow_with_consent(self, redis_client):
-        """An event with hasConsent=true must ultimately appear on ml-inference-tasks
+    def test_media_preprocessor_flow(self, redis_client):
+        """An event published to post-image-processing must appear on ml-inference-tasks
         with a non-empty localFilePath.
 
-        Flow:
-          post-image-processing
-            → consent_gateway  (ml-processing-queue)
-            → media_preprocessor (downloads image)
-            → ml-inference-tasks
+        Flow: post-image-processing → media_preprocessor (downloads image) → ml-inference-tasks
+
+        Note: Consent is enforced by the Java backend before publishing to
+        post-image-processing; the Python layer trusts all events on this stream.
         """
         corr_id = f"e2e-preprocess-{uuid.uuid4().hex[:8]}"
         media_id = f"e2e-m-{corr_id}"
@@ -196,13 +155,12 @@ class TestE2EPipeline:
             {
                 "postId": "e2e-post-preprocess",
                 "mediaId": media_id,
-                "imageUrl": PUBLIC_IMAGE_URL,
+                "mediaUrl": PUBLIC_IMAGE_URL,
                 "correlationId": corr_id,
-                "hasConsent": "true",
             },
         )
 
-        # Allow extra time for two hops + HTTP image download
+        # Allow extra time for HTTP image download
         result = poll_stream(
             redis_client,
             output_stream,

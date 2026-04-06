@@ -61,10 +61,9 @@ All workers are single-process, long-running Python processes. They use `XREADGR
 - Established consumer-group semantics: `XREADGROUP` + `XACK`, automatic group creation, pending-message reclaim via `XCLAIM`.
 - Defined the canonical Pydantic DTOs in `shared/schemas/schemas.py` that mirror Java backend contracts.
 
-### Phase 2 — Consent Gateway & Privacy Routing
-- Built `services/consent_gateway/worker.py`.
-- Every incoming `PostImageEventDTO` is inspected for `hasConsent`. Consented media routes to `ml-processing-queue`; non-consented media routes to `privacy-audit-queue`.
-- Prevents ML processing of media without explicit user consent.
+### Phase 2 — Consent Enforcement (Retired Python Service)
+- Originally housed `services/consent_gateway/worker.py` which routed events by `hasConsent` flag.
+- **Retired:** Consent is now enforced upstream by the Java backend before any event reaches Redis Streams. The `consent_gateway` Python service has been deleted. No Python worker inspects `hasConsent`.
 
 ### Phase 3 — ML Inference Workers (Fan-Out Pattern)
 - Built five parallel inference workers, each operating as an independent consumer group on `post-image-processing`:
@@ -84,7 +83,7 @@ All workers are single-process, long-running Python processes. They use `XREADGR
 ### Phase 5 — Media Pre-processing & Federated Learning
 - Built `services/media_preprocessor/worker.py`: downloads images from URLs to a shared Docker volume, then publishes `LocalMediaEventDTO` to `ml-inference-tasks` so downstream workers can avoid redundant network fetches.
 - Built `services/federated_aggregator/worker.py`: averages gradient payloads from edge nodes (stream: `federated-gradient-updates`) and publishes global model state to `global-model-state`.
-- Added `services/edge-media/src/middleware.py`: Starlette middleware that enforces consent headers on the edge-media CDN path.
+- Built face auto-tagging pipeline: `profile_enrollment` extracts 1024-dim HuggingFace face embeddings and routes them to Java via `user-profile-face-embedding-results`; `face_matcher` runs KNN searches against `known_faces_index` in Elasticsearch to suggest tags, publishing matches to `face-recognition-results`.
 
 ---
 
@@ -92,15 +91,16 @@ All workers are single-process, long-running Python processes. They use `XREADGR
 
 | Service | Consumes From | Produces To | Consumer Group |
 |---------|--------------|-------------|----------------|
-| `consent_gateway` | `post-image-processing` | `ml-processing-queue` \| `privacy-audit-queue` | `consent-gateway-group` |
-| `media_preprocessor` | `ml-processing-queue` | `ml-inference-tasks` | `media-preprocessor-group` |
+| `media_preprocessor` | `post-image-processing` | `ml-inference-tasks` | `media-preprocessor-group` |
 | `content_moderation` | `post-image-processing` | `ml-insights-results` | `content-moderation-group` |
 | `image_tagger` | `post-image-processing` | `ml-insights-results` | `image-tagger-group` |
 | `scene_recognition` | `post-image-processing` | `ml-insights-results` | `scene-recognition-group` |
 | `image_captioning` | `post-image-processing` | `ml-insights-results` | `image-captioning-group` |
 | `face_recognition` | `post-image-processing` | `face-detection-results` | `face-recognition-group` |
+| `profile_enrollment` | `profile-picture-processing` | `user-profile-face-embedding-results` | `profile-enrollment-group` |
+| `face_matcher` | `face-detection-results` | `face-recognition-results` | `face-matcher-group` |
 | `post_aggregator` | `post-aggregation-trigger` + reads `ml-insights-results` + `face-detection-results` | `post-insights-enriched` | `post-aggregator-group` |
-| `es_sync` | `es-sync-queue` | Elasticsearch (HTTP) | `es-sync-group` |
+| `es_sync` | `es-sync-queue` | Elasticsearch — ML/vector indices only (HTTP) | `es-sync-group` |
 | `dlq_processor` | `ai-processing-dlq` | `post-image-processing` (retry) | `dlq-processor-group` |
 | `federated_aggregator` | `federated-gradient-updates` | `global-model-state` | `federated-aggregator-group` |
 
@@ -111,7 +111,7 @@ All workers are single-process, long-running Python processes. They use `XREADGR
 All field values are stored as UTF-8 strings. Lists and dicts are JSON-encoded. Booleans are `"true"` / `"false"`.
 
 ### `post-image-processing`
-Entry point. Published by the Java backend.
+Entry point. Published by the Java backend. Java enforces consent before publishing — all events on this stream have implicit consent.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -119,25 +119,10 @@ Entry point. Published by the Java backend.
 | `postId` | string | Owning post ID |
 | `mediaUrl` | string | Publicly accessible image URL |
 | `correlationId` | string | End-to-end trace identifier |
-| `hasConsent` | string `"true"\|"false"` | User consent flag |
 | `version` | string (optional) | Schema version |
 
 Pydantic schema: `PostImageProcessingMessage` (`shared/schemas/message_schemas.py`)  
 Strict DTO (Java contract): `PostImageEventDTO` (`shared/schemas/schemas.py`)
-
----
-
-### `ml-processing-queue`
-Consent-granted media forwarded by `consent_gateway`.
-
-Same fields as `post-image-processing` (passthrough).
-
----
-
-### `privacy-audit-queue`
-Consent-denied media forwarded by `consent_gateway`.
-
-Same fields as `post-image-processing`. No ML processing is performed.
 
 ---
 
@@ -233,11 +218,17 @@ Pydantic schema: `PostInsightsEnrichedMessage`
 ---
 
 ### `es-sync-queue`
-Published by the Java backend or post_aggregator to trigger Elasticsearch indexing.
+Published by the Java backend to trigger Elasticsearch indexing of ML/vector indices.
+
+**Domain ownership — strictly enforced:**
+- **Python `es_sync` owns:** `face_search`, `recommendations_knn`, `feed_personalized`, `known_faces_index`
+- **Java owns directly** (Spring Data ES, startup sync): `post_search`, `user_search`, `media_search`, `blog_search`
+
+Java only publishes `face_search` events to this queue; the other three ML indices receive events from their respective AI pipeline results.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `indexType` | string | Target index name |
+| `indexType` | string | Target ML index name (see ownership table above) |
 | `documentId` | string | Document ID |
 | `operation` | string | `"index"` \| `"delete"` (default `"index"`) |
 
@@ -344,6 +335,13 @@ Defined in `docker-compose.yml`:
 - `redis-data` — Redis AOF persistence
 - `es-data` — Elasticsearch index data
 
+**Elasticsearch Index Domain Ownership:**
+
+| Layer | Owns | Mechanism |
+|-------|------|-----------|
+| Java (Spring Boot) | `post_search`, `user_search`, `media_search`, `blog_search` | `ElasticsearchStartupSyncService` (bulk on boot) + incremental Spring Data ES saves |
+| Python `es_sync` | `face_search`, `recommendations_knn`, `feed_personalized`, `known_faces_index` | Redis Stream `es-sync-queue` consumer → PostgreSQL read models → ES bulk API |
+
 **Shared mount pattern (ML workers):**  
 `./shared:/app/shared` — the shared library is bind-mounted so changes are live in dev without rebuilding.
 
@@ -397,7 +395,7 @@ Structured JSON logging via `shared/utils/logger.py` — all log lines include `
 
 | Concern | Implementation |
 |---------|---------------|
-| Consent enforcement | `consent_gateway` blocks all ML processing when `hasConsent=false` |
+| Consent enforcement | Handled upstream by the Java backend before events are published to Redis Streams; no Python service inspects consent headers |
 | SSRF prevention | `validate_url()` checks scheme + resolves hostname to block private/loopback IPs |
 | Domain allowlist | `ALLOWED_IMAGE_DOMAINS` env var; defaults to `res.cloudinary.com` |
 | Redis auth | `requirepass` + `REDIS_PASSWORD` injected at compose time |
@@ -446,6 +444,10 @@ The `media_preprocessor` service was built to eliminate redundant network fetche
 | ~~TD-5~~ | Low | `shared/utils/metrics.py` — `ProcessingTimer` class and `record_retry()` were never called | **Deleted** both symbols (April 2026) |
 | ~~TD-6~~ | Low | `shared/redis_streams/utils.py` — `encode_message()` was never imported | **Deleted** function (April 2026) |
 | ~~TD-7~~ | Low | `scripts/setup/setup_es_indices.py` `MAPPINGS_DIR` resolved to `scripts/es_mappings` (nonexistent) instead of repo root `es_mappings/` | **Fixed** path to `Path(__file__).resolve().parents[2] / "es_mappings"` (April 2026) |
+| ~~TD-8~~ | Low | `docker-compose.yml` declared volumes `pgdata`, `minio_data`, `pgadmin_data` whose services were commented out | **Deleted** all three orphaned volume declarations (April 2026) |
+| ~~TD-11~~ | Medium | `services/es_sync/worker.py` `INDEX_MAPPING` contained `post_search`, `user_search`, `media_search` — indices owned and managed by the Java layer — causing ambiguous write ownership | **Removed** from Python `INDEX_MAPPING`; Python es_sync now exclusively owns ML/vector indices (April 2026) |
+| ~~TD-12~~ | Low | `services/es_sync/worker.py` contained a dead `documentData` direct-embed branch from the retired `profile_enrollment → es-sync-queue` path (GAP-2 fix routed profile enrollment to Java instead) | **Removed** unreachable branch (April 2026) |
+| ~~TD-13~~ | Low | `services/edge-media/` (`ConsentMiddleware`) was a Starlette service not present in any compose file; consent is Java's responsibility | **Deleted** directory (April 2026) |
 
 ---
 
@@ -453,6 +455,6 @@ The `media_preprocessor` service was built to eliminate redundant network fetche
 
 | ID | Severity | Description | Location |
 |----|---------|-------------|----------|
-| TD-8 | Low | `docker-compose.yml` declares volumes `pgdata`, `minio_data`, `pgadmin_data` whose services are commented out | `docker-compose.yml` |
+| TD-1 | High | All five ML inference workers still consume from `post-image-processing` and download images independently, ignoring `ml-inference-tasks`; see full description above | `services/{content_moderation,image_tagger,scene_recognition,image_captioning,face_recognition}/worker.py` |
 | TD-9 | Low | The trigger source for `post-aggregation-trigger` stream is not in this repo — believed to originate from the Java backend or a scheduler external to this layer | `services/post_aggregator/worker.py` |
 | TD-10 | Low | `shared/utils/logger.py` uses `datetime.utcnow()` which is deprecated in Python 3.12+; should migrate to `datetime.now(datetime.UTC)` | `shared/utils/logger.py` line 34 |

@@ -68,14 +68,14 @@ else:
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 # Index mapping: indexType -> (table_name, es_index_name)
+# Python es_sync exclusively owns ML/vector indices.
+# Core entity indices (post_search, user_search, media_search) are owned by the
+# Java layer via ElasticsearchStartupSyncService and direct Spring Data ES saves.
 INDEX_MAPPING = {
-    "media_search": ("read_model_media_search", "media_search"),
-    "post_search": ("read_model_post_search", "post_search"),
-    "user_search": ("read_model_user_search", "user_search"),
     "face_search": ("read_model_face_search", "face_search"),
     "recommendations_knn": ("read_model_recommendations_knn", "recommendations_knn"),
     "feed_personalized": ("read_model_feed_personalized", "feed_personalized"),
-    "known_faces_index": ("read_model_known_faces", "known_faces_index")
+    "known_faces_index": ("read_model_known_faces", "known_faces_index"),
 }
 
 # Retry configuration
@@ -645,42 +645,24 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         
         table_name, es_index_name = mapping
         
-        document_data_raw = decoded_data.get("documentData")
-
         if operation == "delete":
             success = sync_handler.delete_document(es_index_name, document_id)
-        elif document_data_raw:
-            # Direct embedding path: full document payload is in the message.
-            # Used by profile_enrollment to avoid a PostgreSQL round-trip.
-            try:
-                es_document = json.loads(document_data_raw)
-            except (json.JSONDecodeError, TypeError) as exc:
-                LOGGER.error("Invalid documentData JSON", extra={
-                    "error": str(exc),
-                    "document_id": document_id
-                })
-                return
-            for field in ["embedding", "imageEmbedding", "textEmbedding",
-                          "faceEmbedding", "face_embedding"]:
-                if field in es_document:
-                    es_document[field] = parse_vector_field(es_document[field])
-            success = sync_handler.sync_document(es_index_name, document_id, es_document)
         else:
             pg_data = sync_handler.read_from_postgresql(table_name, document_id)
-            
+
             if not pg_data:
                 LOGGER.error("Failed to read data from PostgreSQL", extra={
                     "table": table_name,
                     "document_id": document_id
                 })
                 return
-            
+
             es_document = map_postgresql_to_elasticsearch(table_name, pg_data)
-            
+
             for field in ["embedding", "imageEmbedding", "textEmbedding", "faceEmbedding"]:
                 if field in es_document:
                     es_document[field] = parse_vector_field(es_document[field])
-            
+
             success = sync_handler.sync_document(es_index_name, document_id, es_document)
         
         if success:
