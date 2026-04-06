@@ -1,7 +1,4 @@
 {
-  "aliases": {
-    "known_faces_index": {}
-  },
   "settings": {
     "index": {
       "number_of_shards": 1,
