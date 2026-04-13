@@ -20,8 +20,11 @@ DOCKER_REGISTRY_BACKEND="ajayprabhu2004"
 DOCKER_REGISTRY_AI="shishir01"
 APP_VERSION="${APP_VERSION:-latest}"
 
-# AI Services list
+# AI Services list (must match images in docker-compose.prod.yml)
 AI_SERVICES=(
+    "media_preprocessor"
+    "profile_enrollment"
+    "face_matcher"
     "content_moderation"
     "image_tagger"
     "scene_recognition"

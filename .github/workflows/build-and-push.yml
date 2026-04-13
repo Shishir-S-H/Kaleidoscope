@@ -19,6 +19,11 @@ jobs:
           - face_recognition
           - post_aggregator
           - es_sync
+          - media_preprocessor
+          - profile_enrollment
+          - face_matcher
+          - dlq_processor
+          - federated_aggregator
 
     steps:
       - name: Checkout code

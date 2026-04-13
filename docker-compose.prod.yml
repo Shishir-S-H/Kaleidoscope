@@ -3,7 +3,7 @@
 # This file orchestrates all services with proper startup order:
 # 1. Infrastructure: redis → elasticsearch (with healthchecks)
 # 2. Backend: app (depends on redis/elasticsearch)
-# 3. AI Services: All 7 services (depend on redis)
+# 3. AI Services: workers below (depend on redis / ES as declared)
 # 4. Reverse Proxy: nginx (depends on app)
 #
 # Image Strategy:
@@ -133,6 +133,7 @@ services:
 
   media_preprocessor:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-media_preprocessor:latest
+    pull_policy: always
     container_name: media_preprocessor
     restart: always
     environment:
@@ -153,6 +154,7 @@ services:
 
   profile_enrollment:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-profile_enrollment:latest
+    pull_policy: always
     container_name: profile_enrollment
     restart: always
     environment:
@@ -172,6 +174,7 @@ services:
 
   face_matcher:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_matcher:latest
+    pull_policy: always
     container_name: face_matcher
     restart: always
     environment:
@@ -193,6 +196,7 @@ services:
 
   content_moderation:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-content_moderation:latest
+    pull_policy: always
     container_name: content_moderation
     restart: always
     volumes:
@@ -215,6 +219,7 @@ services:
 
   image_tagger:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_tagger:latest
+    pull_policy: always
     container_name: image_tagger
     restart: always
     volumes:
@@ -237,6 +242,7 @@ services:
 
   scene_recognition:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-scene_recognition:latest
+    pull_policy: always
     container_name: scene_recognition
     restart: always
     volumes:
@@ -260,6 +266,7 @@ services:
 
   image_captioning:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_captioning:latest
+    pull_policy: always
     container_name: image_captioning
     restart: always
     volumes:
@@ -282,6 +289,7 @@ services:
 
   face_recognition:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_recognition:latest
+    pull_policy: always
     container_name: face_recognition
     restart: always
     volumes:
@@ -304,6 +312,7 @@ services:
 
   post_aggregator:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-post_aggregator:latest
+    pull_policy: always
     container_name: post_aggregator
     restart: always
     environment:
@@ -321,6 +330,7 @@ services:
 
   es_sync:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-es_sync:latest
+    pull_policy: always
     container_name: es_sync
     restart: always
     env_file:

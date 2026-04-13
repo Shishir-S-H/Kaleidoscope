@@ -1,12 +1,16 @@
 # Docker Compose file for Kaleidoscope AI Microservices
 # Note: version field is obsolete in modern Docker Compose
+#
+# AI workers use pre-built images from Docker Hub (same tags as production).
+# Set DOCKER_USERNAME in .env to match the account that pushes images (CI default: shishir01).
+# After changing code: push to main (or run workflow_dispatch) so CI builds and pushes, then:
+#   docker compose pull <service> && docker compose up -d <service>
 
 services:
   content_moderation:
-    build: ./services/content_moderation
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-content_moderation:latest
+    pull_policy: always
     volumes:
-      - ./services/content_moderation:/app
-      - ./shared:/app/shared
       - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
@@ -30,10 +34,9 @@ services:
         max-file: "3"
 
   image_tagger:
-    build: ./services/image_tagger
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_tagger:latest
+    pull_policy: always
     volumes:
-      - ./services/image_tagger:/app
-      - ./shared:/app/shared
       - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
@@ -57,10 +60,9 @@ services:
         max-file: "3"
 
   scene_recognition:
-    build: ./services/scene_recognition
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-scene_recognition:latest
+    pull_policy: always
     volumes:
-      - ./services/scene_recognition:/app
-      - ./shared:/app/shared
       - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
@@ -84,10 +86,9 @@ services:
         max-file: "3"
 
   image_captioning:
-    build: ./services/image_captioning
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_captioning:latest
+    pull_policy: always
     volumes:
-      - ./services/image_captioning:/app
-      - ./shared:/app/shared
       - ./local_media_cache:/tmp/kaleidoscope_media
     restart: always
     env_file:
@@ -162,10 +163,9 @@ services:
   #     - pgadmin_data:/var/lib/pgadmin
 
   face_recognition:
-    build: ./services/face_recognition
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_recognition:latest
+    pull_policy: always
     volumes:
-      - ./services/face_recognition:/app
-      - ./shared:/app/shared
       - ./local_media_cache:/tmp/kaleidoscope_media
     env_file:
       - ./shared/env_templates/face_recognition.env
@@ -189,10 +189,8 @@ services:
         max-file: "3"
 
   post_aggregator:
-    build: ./services/post_aggregator
-    volumes:
-      - ./services/post_aggregator:/app
-      - ./shared:/app/shared
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-post_aggregator:latest
+    pull_policy: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
     depends_on:
@@ -211,10 +209,8 @@ services:
         max-file: "3"
 
   es_sync:
-    build: ./services/es_sync
-    volumes:
-      - ./services/es_sync:/app
-      - ./shared:/app/shared
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-es_sync:latest
+    pull_policy: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required}@elasticsearch:9200
@@ -237,10 +233,8 @@ services:
         max-file: "3"
 
   dlq_processor:
-    build: ./services/dlq_processor
-    volumes:
-      - ./services/dlq_processor:/app
-      - ./shared:/app/shared
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-dlq_processor:latest
+    pull_policy: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       - DLQ_AUTO_RETRY=false
@@ -325,12 +319,9 @@ services:
   # ---------------------------------------------------------------------------
 
   media_preprocessor:
-    build:
-      context: .
-      dockerfile: services/media_preprocessor/Dockerfile
-    working_dir: /app
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-media_preprocessor:latest
+    pull_policy: always
     volumes:
-      - .:/app
       - ./local_media_cache:/tmp/kaleidoscope_media
     restart: unless-stopped
     environment:
@@ -346,12 +337,8 @@ services:
         max-file: "3"
 
   federated_aggregator:
-    build:
-      context: .
-      dockerfile: services/federated_aggregator/Dockerfile
-    working_dir: /app
-    volumes:
-      - .:/app
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-federated_aggregator:latest
+    pull_policy: always
     restart: unless-stopped
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
@@ -372,7 +359,14 @@ services:
       - redis-data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required} --protected-mode yes
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD required}", "ping"]
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD:?REDIS_PASSWORD required}",
+          "ping",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -396,7 +390,11 @@ services:
     volumes:
       - es-data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required} http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -u elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required} http://localhost:9200/_cluster/health || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
