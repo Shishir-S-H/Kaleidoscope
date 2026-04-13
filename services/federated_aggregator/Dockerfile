@@ -8,4 +8,7 @@ RUN pip install --no-cache-dir \
         -r services/federated_aggregator/requirements.txt \
         -r shared/requirements.txt
 
+COPY shared /app/shared
+COPY services/federated_aggregator /app/services/federated_aggregator
+
 CMD ["python", "-m", "services.federated_aggregator.worker"]
