@@ -9,7 +9,7 @@ Pipeline under test
 ───────────────────
   POST /api/auth/register → POST /api/auth/login
     → randomuser.me portrait → PUT /api/users/profile (backend → Cloudinary + DB)
-    → per post: PIL composite “group photo” (author + 1–N peers) → Cloudinary upload
+    → per post: PIL square grid composite (author + peers) → Cloudinary upload
       → POST /api/posts  { title, body, mediaUrls[] }
         → Redis: post-image-processing
           → media_preprocessor → ml-inference-tasks
@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PIL import Image
+from PIL import Image, ImageOps
 import requests
 from dotenv import load_dotenv
 
@@ -101,9 +101,9 @@ IMAGE_HEIGHT        = int(os.getenv("IMAGE_HEIGHT", "600"))
 STRESS_RANDOMUSER_API_URL   = os.getenv("STRESS_RANDOMUSER_API_URL", "https://randomuser.me/api/")
 STRESS_FACE_API_DELAY_S     = float(os.getenv("STRESS_FACE_API_DELAY_S", "0.45"))
 STRESS_FACE_DOWNLOAD_RETRIES = int(os.getenv("STRESS_FACE_DOWNLOAD_RETRIES", "5"))
-# Composite group-photo row (author + random peers from the stress user pool)
+# Composite group-photo grid (author + random peers); fixed square canvas
 STRESS_COMPOSITE_MAX_FRIENDS = int(os.getenv("STRESS_COMPOSITE_MAX_FRIENDS", "2"))
-STRESS_COMPOSITE_ROW_HEIGHT  = int(os.getenv("STRESS_COMPOSITE_ROW_HEIGHT", "400"))
+STRESS_COMPOSITE_CANVAS      = int(os.getenv("STRESS_COMPOSITE_CANVAS", "800"))
 
 # Monotonic index for randomuser.me pacing + unique seeds (identity + per-post extras).
 _stress_face_download_seq = 0
@@ -336,11 +336,21 @@ def _synthetic_jpeg(index: int) -> Path:
     return dest
 
 
-def _pil_resample_high_quality():
+_COMPOSITE_BG = (24, 24, 24)
+
+
+def _fit_to_slot(src: Image.Image, slot_w: int, slot_h: int) -> Image.Image:
+    """Scale and center-crop a portrait to fill (slot_w, slot_h) without skew."""
     try:
-        return Image.Resampling.LANCZOS  # Pillow 10+
+        method = Image.Resampling.LANCZOS  # Pillow 10+
     except AttributeError:
-        return getattr(Image, "LANCZOS", Image.BICUBIC)
+        method = getattr(Image, "LANCZOS", Image.BICUBIC)
+    return ImageOps.fit(
+        src.convert("RGB"),
+        (slot_w, slot_h),
+        method=method,
+        centering=(0.5, 0.5),
+    )
 
 
 def create_composite_group_photo(
@@ -349,16 +359,14 @@ def create_composite_group_photo(
     max_friends: int = 2,
 ) -> Path:
     """
-    Horizontal collage: author face (always) + 1..max_friends other users from
-    the stress pool. Images are resized to a common row height, then stitched
-    left-to-right for multi-face AI testing.
+    Square gallery grid (default 800×800): author + 1..max_friends peers.
+    Layout: 1 face → full canvas; 2 faces → 1×2; 3–4 faces → 2×2 (empty slots
+    stay dark gray when only 3 faces).
     """
     if not author.identity_image_path:
         raise ValueError("author.identity_image_path is required")
 
     others = [u for u in all_users if u is not author and u.identity_image_path]
-    resample = _pil_resample_high_quality()
-    target_h = max(64, STRESS_COMPOSITE_ROW_HEIGHT)
 
     paths: List[Path] = [author.identity_image_path]
     if others:
@@ -368,34 +376,57 @@ def create_composite_group_photo(
             if f.identity_image_path:
                 paths.append(f.identity_image_path)
 
-    resized: List[Image.Image] = []
+    # 2×2 grid supports at most four portraits
+    if len(paths) > 4:
+        log.warning("[composite] capping at 4 faces (2×2 grid); had %d paths", len(paths))
+        paths = paths[:4]
+
+    imgs: List[Image.Image] = []
     for p in paths:
         with Image.open(p) as im:
-            rgb = im.convert("RGB")
-            w, h = rgb.size
-            if h <= 0:
-                continue
-            new_w = max(1, int(round(w * (target_h / float(h)))))
-            resized.append(rgb.resize((new_w, target_h), resample))
+            imgs.append(im.copy())
 
-    if not resized:
+    if not imgs:
         raise RuntimeError("create_composite_group_photo: no valid images")
 
-    total_w = sum(im.width for im in resized)
-    row = Image.new("RGB", (total_w, target_h), color=(24, 24, 24))
-    x = 0
-    for im in resized:
-        row.paste(im, (x, 0))
-        x += im.width
+    s = max(64, STRESS_COMPOSITE_CANVAS)
+    canvas = Image.new("RGB", (s, s), color=_COMPOSITE_BG)
+    n = len(imgs)
+
+    if n == 1:
+        canvas.paste(_fit_to_slot(imgs[0], s, s), (0, 0))
+        layout = "1×1 full"
+    elif n == 2:
+        w_slot, h_slot = s // 2, s
+        canvas.paste(_fit_to_slot(imgs[0], w_slot, h_slot), (0, 0))
+        canvas.paste(_fit_to_slot(imgs[1], w_slot, h_slot), (w_slot, 0))
+        layout = "1×2"
+    elif n == 3:
+        w_slot, h_slot = s // 2, s // 2
+        canvas.paste(_fit_to_slot(imgs[0], w_slot, h_slot), (0, 0))
+        canvas.paste(_fit_to_slot(imgs[1], w_slot, h_slot), (w_slot, 0))
+        canvas.paste(_fit_to_slot(imgs[2], w_slot, h_slot), (0, h_slot))
+        layout = "2×2 (3 filled, BR empty)"
+    else:
+        w_slot, h_slot = s // 2, s // 2
+        for i in range(4):
+            canvas.paste(
+                _fit_to_slot(imgs[i], w_slot, h_slot),
+                ((i % 2) * w_slot, (i // 2) * h_slot),
+            )
+        layout = "2×2"
 
     out_dir = Path(os.getenv("STRESS_COMPOSITE_TMP", "/tmp"))
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"group_{uuid.uuid4().hex}.jpg"
-    row.save(out_path, "JPEG", quality=92, optimize=True)
+    canvas.save(out_path, "JPEG", quality=92, optimize=True)
     log.info(
-        "[composite] %d face(s) in strip (author + %d peer(s)) → %s",
-        len(resized),
-        len(resized) - 1,
+        "[composite] %d×%d %s  %d face(s) (author + %d peer(s)) → %s",
+        s,
+        s,
+        layout,
+        n,
+        n - 1,
         out_path.name,
     )
     return out_path
@@ -1177,8 +1208,9 @@ def main() -> None:
     log.info("  ES       : %s", ES_HOST)
     log.info("  Users    : %d   Posts/user: %d", NUM_USERS, POSTS_PER_USER)
     log.info(
-        "  Group photo: row height=%d px  max extra faces=%d",
-        STRESS_COMPOSITE_ROW_HEIGHT,
+        "  Group photo: canvas=%d×%d  max extra faces=%d",
+        STRESS_COMPOSITE_CANVAS,
+        STRESS_COMPOSITE_CANVAS,
         STRESS_COMPOSITE_MAX_FRIENDS,
     )
     log.info("═══════════════════════════════════════════════════")
