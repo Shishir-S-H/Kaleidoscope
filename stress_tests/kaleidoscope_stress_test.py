@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -61,6 +62,14 @@ DB_PORT             = int(os.getenv("DB_PORT",          "5432"))
 DB_NAME             = os.getenv("DB_NAME",              "kaleidoscope")
 DB_USER             = os.getenv("DB_USERNAME",          "postgres")
 DB_PASSWORD         = os.getenv("DB_PASSWORD",          "")
+# Neon / managed DB: same host as Spring when SPRING_DATASOURCE_URL is set.
+_spring_jdbc = os.getenv("SPRING_DATASOURCE_URL", "")
+if _spring_jdbc.startswith("jdbc:postgresql://"):
+    _m = re.match(r"jdbc:postgresql://([^:/]+)(?::(\d+))?/([^?]+)", _spring_jdbc)
+    if _m:
+        DB_HOST = _m.group(1)
+        DB_PORT = int(_m.group(2) or "5432")
+        DB_NAME = _m.group(3)
 ES_HOST             = os.getenv("ES_HOST",              "http://localhost:9200")
 ES_USER             = os.getenv("ES_USER",              "elastic")
 ES_PASSWORD         = os.getenv("ES_PASSWORD",          "")
@@ -619,14 +628,21 @@ def _extract_media_ids(posts: List[dict]) -> List[str]:
 def _open_pg_connection():
     """Open and return a fresh psycopg2 connection."""
     import psycopg2
-    return psycopg2.connect(
-        host     = DB_HOST,
-        port     = DB_PORT,
-        dbname   = DB_NAME,
-        user     = DB_USER,
-        password = DB_PASSWORD,
-        connect_timeout = 10,
+
+    sslmode = os.getenv("PGSSLMODE", "")
+    if not sslmode:
+        sslmode = "prefer" if DB_HOST in ("localhost", "127.0.0.1", "::1") else "require"
+    kw = dict(
+        host              = DB_HOST,
+        port              = DB_PORT,
+        dbname            = DB_NAME,
+        user              = DB_USER,
+        password          = DB_PASSWORD,
+        connect_timeout   = 10,
     )
+    if sslmode:
+        kw["sslmode"] = sslmode
+    return psycopg2.connect(**kw)
 
 
 def _fetch_pending_verification_code(email: str) -> Optional[str]:
