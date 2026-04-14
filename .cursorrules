@@ -1,19 +1,14 @@
-# KALEIDOSCOPE AI - ENTERPRISE DOCUMENTATION & CONSOLIDATION DIRECTIVES
-
-## 1. Operating Boundaries
-
-- TARGET ENVIRONMENT: Local Workspace (Both `Kaleidoscope` core repo and `kaleidoscope-ai` repo).
-- OPERATING MODE: Lead Technical Writer & Enterprise Architect.
-- STRICT RESTRICTION: You are absolutely FORBIDDEN from modifying, proposing changes to, or deleting any application code (Java, Python, TS/JS, SQL, Dockerfiles). You may only modify Markdown (`.md`) files.
-
-## 2. Audit & Consolidation Mandate
-
-- CROSS-REPO VERIFICATION: You must quickly scan the current state of both repositories to ensure you understand the final deployed architecture (e.g., Java handling consent, Python exclusively handling vector ES indices).
-- DE-DUPLICATION: You must analyze the legacy `kaleidoscope-ai/docs/` folder against the newly created `documentation/` folder.
-- SINGLE SOURCE OF TRUTH: All accurate, historical, and architectural documentation must be consolidated into a single `documentation/` folder. The legacy `docs/` folder must be completely safely eliminated.
-
-## 3. Execution Style
-
-- Read thoroughly before deleting. If `docs/` contains valuable setup guides or API notes that aren't in `documentation/`, you must merge that information first.
-- Keep diagrams (Mermaid) intact and ensure formatting is highly professional.
-- Ensure the root `README.md` files point clearly to the new `documentation/` directory.
+{
+"project_context": {
+"name": "Kaleidoscope",
+"deployment": "Dockerized microservices via SSH, with external DB and Cloudinary",
+"ci_cd": "GitHub Actions"
+},
+"rules": [
+"When orchestrating deployments, ALWAYS verify the Git working tree is clean after committing.",
+"Do not assume CI/CD finishes instantly. If the GitHub CLI ('gh') is unavailable to poll action status, explicitly pause and ask the user to confirm CI/CD success before proceeding.",
+"Before running stress tests, ALWAYS verify the health of the target services (e.g., check 'docker ps' or ping the backend health endpoint).",
+"Acknowledge that external services (Database, Cloudinary) rely strictly on the local '.env' file. Ensure test scripts load this file via 'python-dotenv'.",
+"At the end of any automated test run, provide the user with explicit, copy-pasteable terminal commands to manually cross-verify the results in the database or logs."
+]
+}
