@@ -28,7 +28,7 @@ DTOs.  Java enforces consent before publishing to Redis, so creating a valid
 account is the only prerequisite.
 
 Dependencies (pip install):
-  requests faker cloudinary psycopg2-binary elasticsearch python-dotenv
+  requests faker psycopg2-binary elasticsearch python-dotenv
 
 Environment variables (see CONFIG block below). A `.env` file at the repo root
 is loaded automatically via python-dotenv (override with real env vars as needed).
@@ -36,6 +36,7 @@ is loaded automatically via python-dotenv (override with real env vars as needed
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -63,18 +64,17 @@ DB_PASSWORD         = os.getenv("DB_PASSWORD",          "")
 ES_HOST             = os.getenv("ES_HOST",              "http://localhost:9200")
 ES_USER             = os.getenv("ES_USER",              "elastic")
 ES_PASSWORD         = os.getenv("ES_PASSWORD",          "")
-CLOUDINARY_CLOUD    = os.getenv("CLOUDINARY_CLOUD_NAME", "")
-CLOUDINARY_API_KEY  = os.getenv("CLOUDINARY_API_KEY",   "")
-CLOUDINARY_SECRET   = os.getenv("CLOUDINARY_SECRET",    "")
 
 NUM_USERS           = int(os.getenv("STRESS_NUM_USERS",     "3"))
 POSTS_PER_USER      = int(os.getenv("STRESS_POSTS_PER_USER", "2"))
+# If unset, the first category from GET /api/categories is used (requires auth).
+STRESS_CATEGORY_ID  = os.getenv("STRESS_CATEGORY_ID", "").strip()
 
 # Pipeline-completion polling
 POLL_INTERVAL_S     = float(os.getenv("POLL_INTERVAL_S",  "5"))
 POLL_TIMEOUT_S      = float(os.getenv("POLL_TIMEOUT_S",  "300"))   # 5 min max
 
-# Cloudinary upload retry
+# Signed upload retry (same env names as legacy direct-Cloudinary upload)
 CLOUDINARY_MAX_RETRIES  = int(os.getenv("CLOUDINARY_MAX_RETRIES",   "3"))
 CLOUDINARY_RETRY_BASE_S = float(os.getenv("CLOUDINARY_RETRY_BASE_S", "2.0"))
 
@@ -275,50 +275,172 @@ def _synthetic_jpeg(index: int) -> Path:
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 1 – Identity & consent setup
 # ─────────────────────────────────────────────────────────────────────────────
-# Contract: documentation/integration_contracts.md §1 Authentication
-#   POST /api/auth/register  { username, email, password, department }
-#     → 201 { userId, accessToken }
+# Contract: backend AuthController
+#   POST /api/auth/register  multipart/form-data: userData (JSON: email, password,
+#     username, designation, summary) + optional profilePicture
+#     → 201 AppResponse { data: { userId, … } }  (no JWT; login next)
 #   POST /api/auth/login     { email, password }
-#     → 200 { accessToken, user }
+#     → 200 AppResponse { data: UserLoginResponseDTO }; Authorization: Bearer …
 #
 # hasConsent was removed in Phase C (GAP-6).  A valid account is sufficient.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _register(user: TestUser) -> Optional[TestUser]:
-    """Attempt to register; returns populated TestUser on 201, None otherwise."""
-    resp = requests.post(
-        f"{BACKEND_BASE_URL}/api/auth/register",
-        json={
-            "username":   user.username,
-            "email":      user.email,
-            "password":   user.password,
-            "department": user.department,
-        },
-        timeout=15,
+def _api_base() -> str:
+    return BACKEND_BASE_URL.rstrip("/")
+
+
+def _auth_headers(user: TestUser) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {user.access_token}"}
+
+
+def _unwrap_data(payload: dict):
+    """Return Spring `data` field when present."""
+    if isinstance(payload, dict) and "data" in payload and payload["data"] is not None:
+        return payload["data"]
+    return payload
+
+
+def _paginated_content(body: dict) -> List:
+    """Extract list from AppResponse<PaginatedResponse<T>> or legacy shapes."""
+    data = _unwrap_data(body) if isinstance(body, dict) else body
+    if isinstance(data, dict) and isinstance(data.get("content"), list):
+        return data["content"]
+    if isinstance(body, dict) and isinstance(body.get("content"), list):
+        return body["content"]
+    if isinstance(body, list):
+        return body
+    return []
+
+
+def resolve_category_id(user: TestUser) -> int:
+    """Pick a category id from STRESS_CATEGORY_ID or GET /api/categories."""
+    if STRESS_CATEGORY_ID.isdigit():
+        return int(STRESS_CATEGORY_ID)
+    resp = requests.get(
+        f"{_api_base()}/api/categories",
+        params={"page": 0, "size": 50},
+        headers=_auth_headers(user),
+        timeout=20,
     )
-    if resp.status_code == 201:
-        body             = resp.json()
-        user.user_id     = str(body["userId"])
-        user.access_token = body["accessToken"]
-        log.info("[user] registered  %-30s  id=%s", user.username, user.user_id)
-        return user
-    return None
+    resp.raise_for_status()
+    items = _paginated_content(resp.json())
+    if not items:
+        raise RuntimeError(
+            "No categories from GET /api/categories — seed categories or set STRESS_CATEGORY_ID",
+        )
+    cid = items[0].get("categoryId")
+    if cid is None:
+        raise RuntimeError("Category DTO missing categoryId")
+    log.info("[category] using category_id=%s (%s)", cid, items[0].get("name", ""))
+    return int(cid)
+
+
+def _request_upload_signatures(user: TestUser, file_name: str) -> dict:
+    """POST /api/posts/generate-upload-signatures → first SignatureDataDTO as dict."""
+    resp = requests.post(
+        f"{_api_base()}/api/posts/generate-upload-signatures",
+        json={"fileNames": [file_name], "contentType": "POST"},
+        headers=_auth_headers(user),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = _unwrap_data(resp.json())
+    sigs = data.get("signatures") if isinstance(data, dict) else None
+    if not sigs:
+        raise RuntimeError("generate-upload-signatures returned no signatures")
+    return sigs[0]
+
+
+def _signed_upload_to_cloudinary(image_path: Path, sig: dict) -> str:
+    """Upload bytes using backend-issued Cloudinary signature (MediaAssetTracker PENDING)."""
+    cloud = sig.get("cloudName") or sig.get("cloud_name")
+    upload_url = f"https://api.cloudinary.com/v1_1/{cloud}/image/upload"
+    with open(image_path, "rb") as fp:
+        files = {"file": (image_path.name, fp, "image/jpeg")}
+        form = {
+            "api_key":     sig.get("apiKey") or sig.get("api_key"),
+            "timestamp":   str(sig.get("timestamp", "")),
+            "signature":   sig.get("signature", ""),
+            "public_id":   sig.get("publicId") or sig.get("public_id"),
+            "folder":      sig.get("folder", ""),
+        }
+        resp = requests.post(upload_url, files=files, data=form, timeout=120)
+    resp.raise_for_status()
+    return resp.json()["secure_url"]
+
+
+def upload_image_for_post(user: TestUser, image_path: Path) -> str:
+    """
+    Backend-mandated flow: signed upload intent → Cloudinary upload → secure_url.
+    Retries on transient failures (same backoff as legacy direct upload).
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, CLOUDINARY_MAX_RETRIES + 1):
+        try:
+            sig = _request_upload_signatures(user, image_path.name)
+            url = _signed_upload_to_cloudinary(image_path, sig)
+            log.info("[upload] attempt %d/%d  ✓  %s → %s",
+                     attempt, CLOUDINARY_MAX_RETRIES, image_path.name, url[:80])
+            return url
+        except Exception as exc:
+            last_exc = exc
+            if attempt < CLOUDINARY_MAX_RETRIES:
+                delay = CLOUDINARY_RETRY_BASE_S * (2 ** (attempt - 1))
+                log.warning("[upload] attempt %d/%d failed (%s) – retry in %.1fs …",
+                            attempt, CLOUDINARY_MAX_RETRIES, exc, delay)
+                time.sleep(delay)
+            else:
+                log.error("[upload] exhausted retries for %s: %s", image_path.name, exc)
+    raise last_exc  # type: ignore[misc]
+
+
+def _register(user: TestUser) -> Optional[TestUser]:
+    """Multipart register (Spring consumes MULTIPART_FORM_DATA + userData JSON)."""
+    user_data = {
+        "email":       user.email,
+        "password":    user.password,
+        "username":    user.username,
+        "designation": user.department,
+        "summary":     f"Stress test account ({user.full_name})",
+    }
+    files = {"userData": (None, json.dumps(user_data), "application/json")}
+    resp = requests.post(f"{_api_base()}/api/auth/register", files=files, timeout=30)
+    if resp.status_code != 201:
+        return None
+    try:
+        body = resp.json()
+        data = body.get("data") or {}
+        if data.get("userId") is not None:
+            user.user_id = str(data["userId"])
+    except (ValueError, TypeError, KeyError):
+        return None
+    log.info("[user] registered  %-30s  id=%s", user.username, user.user_id)
+    return user
 
 
 def _login(user: TestUser) -> Optional[TestUser]:
-    """Attempt to login; returns populated TestUser on 200, None otherwise."""
+    """Login; JWT is returned in the Authorization response header."""
     resp = requests.post(
-        f"{BACKEND_BASE_URL}/api/auth/login",
+        f"{_api_base()}/api/auth/login",
         json={"email": user.email, "password": user.password},
         timeout=15,
     )
-    if resp.status_code == 200:
-        body             = resp.json()
-        user.access_token = body["accessToken"]
-        user.user_id     = str(body["user"]["id"])
-        log.info("[user] logged in   %-30s  id=%s", user.username, user.user_id)
-        return user
-    return None
+    if resp.status_code != 200:
+        return None
+    try:
+        body = resp.json()
+        data = body.get("data") or {}
+        if data.get("userId") is not None:
+            user.user_id = str(data["userId"])
+        auth = resp.headers.get("Authorization") or ""
+        if auth.startswith("Bearer "):
+            user.access_token = auth[7:].strip()
+    except (ValueError, TypeError, KeyError):
+        return None
+    if not user.access_token:
+        return None
+    log.info("[user] logged in   %-30s  id=%s", user.username, user.user_id)
+    return user
 
 
 def create_test_user(fake) -> Optional[TestUser]:
@@ -335,14 +457,14 @@ def create_test_user(fake) -> Optional[TestUser]:
         full_name  = full_name,
     )
 
-    result = _register(user)
-    if result:
-        return result
+    if _register(user):
+        # Registration does not return a JWT; obtain token via login.
+        if _login(user):
+            return user
 
-    # 409/400 → account already exists; try login
-    result = _login(user)
-    if result:
-        return result
+    # Account may already exist from a prior run — try login only.
+    if _login(user):
+        return user
 
     log.error("[user] could not register or log in as %s", user.email)
     return None
@@ -362,99 +484,72 @@ def setup_users(n: int, fake) -> List[TestUser]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 2a – Cloudinary upload  (with exponential-backoff retries)
+# Phase 2a – Signed Cloudinary upload (backend MediaAssetTracker PENDING)
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/posts takes mediaUrls[] (Cloudinary secure_url).
-# The binary upload to Cloudinary must succeed before the post is created.
-#
-# Retry strategy:
-#   attempt 1 → immediate
-#   attempt 2 → sleep 2 s
-#   attempt 3 → sleep 4 s
-#   …up to CLOUDINARY_MAX_RETRIES total attempts.
+# POST /api/posts/generate-upload-signatures → POST Cloudinary image/upload
+# (see upload_image_for_post).  Retries use CLOUDINARY_* backoff env vars.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def upload_to_cloudinary(image_path: Path) -> str:
-    """
-    Upload a local image to Cloudinary and return its secure_url.
-
-    Retries up to CLOUDINARY_MAX_RETRIES times with exponential backoff so
-    transient network hiccups do not abort the ingestion loop.
-    Raises the last exception if all attempts are exhausted.
-    """
-    import cloudinary
-    import cloudinary.uploader
-
-    cloudinary.config(
-        cloud_name = CLOUDINARY_CLOUD,
-        api_key    = CLOUDINARY_API_KEY,
-        api_secret = CLOUDINARY_SECRET,
-        secure     = True,
-    )
-
-    last_exc: Optional[Exception] = None
-
-    for attempt in range(1, CLOUDINARY_MAX_RETRIES + 1):
-        try:
-            result = cloudinary.uploader.upload(
-                str(image_path),
-                folder    = "kaleidoscope_stress_test",
-                public_id = f"stress_{uuid.uuid4().hex[:12]}",
-            )
-            url = result["secure_url"]
-            log.info("[cloudinary] attempt %d/%d  ✓  %s → %s",
-                     attempt, CLOUDINARY_MAX_RETRIES, image_path.name, url)
-            return url
-
-        except Exception as exc:
-            last_exc = exc
-            if attempt < CLOUDINARY_MAX_RETRIES:
-                delay = CLOUDINARY_RETRY_BASE_S * (2 ** (attempt - 1))
-                log.warning(
-                    "[cloudinary] attempt %d/%d failed (%s) – retrying in %.1fs …",
-                    attempt, CLOUDINARY_MAX_RETRIES, exc, delay,
-                )
-                time.sleep(delay)
-            else:
-                log.error(
-                    "[cloudinary] all %d attempts exhausted for %s: %s",
-                    CLOUDINARY_MAX_RETRIES, image_path.name, exc,
-                )
-
-    raise last_exc  # type: ignore[misc]
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 2b – Post creation
+# Phase 2b – Post creation (PostCreateRequestDTO)
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/posts  { title, body, mediaUrls[] }  → 201 PostDTO
+# POST /api/posts  JSON body with mediaDetails[], categoryIds[], visibility, …
 # Authorization: Bearer <accessToken>
-# Contract: integration_contracts.md §1 Posts & Media line 52
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_post(user: TestUser, media_urls: List[str], title: str, body: str) -> dict:
-    """Create a post with the given Cloudinary URLs and return the PostDTO."""
+def create_post(
+    user:        TestUser,
+    media_url:   str,
+    title:       str,
+    body:        str,
+    summary:     str,
+    category_id: int,
+) -> dict:
+    """Create a post; returns `data` PostCreationResponseDTO as dict."""
+    payload = {
+        "title":        title,
+        "body":         body,
+        "summary":      summary,
+        "mediaDetails": [
+            {
+                "mediaId":          None,
+                "url":              media_url,
+                "mediaType":        "IMAGE",
+                "position":         0,
+                "width":            IMAGE_WIDTH,
+                "height":           IMAGE_HEIGHT,
+                "fileSizeKb":       None,
+                "durationSeconds":  None,
+                "extraMetadata":    None,
+            },
+        ],
+        "visibility":    "PUBLIC",
+        "locationId":    None,
+        "categoryIds":   [category_id],
+        "taggedUserIds": [],
+    }
     resp = requests.post(
-        f"{BACKEND_BASE_URL}/api/posts",
-        json={
-            "title":     title,
-            "body":      body,
-            "mediaUrls": media_urls,
-        },
-        headers={"Authorization": f"Bearer {user.access_token}"},
-        timeout=20,
+        f"{_api_base()}/api/posts",
+        json=payload,
+        headers=_auth_headers(user),
+        timeout=60,
     )
     resp.raise_for_status()
-    post = resp.json()
-    log.info("[post] created  id=%-8s  user=%-28s  media=%d  title=%r",
-             post.get("id") or post.get("postId"),
+    raw = resp.json()
+    post = _unwrap_data(raw) if isinstance(raw, dict) else raw
+    log.info("[post] created  id=%-8s  user=%-28s  title=%r",
+             post.get("postId") or post.get("id"),
              user.username,
-             len(media_urls),
              title[:50])
     return post
 
 
-def ingest_content(users: List[TestUser], image_paths: List[Path], fake) -> List[dict]:
+def ingest_content(
+    users:       List[TestUser],
+    image_paths: List[Path],
+    fake,
+    category_id: int,
+) -> List[dict]:
     """
     For every user × POSTS_PER_USER, upload the pre-downloaded image to
     Cloudinary, then create the post.  Content (title, body) is Faker-generated
@@ -466,12 +561,13 @@ def ingest_content(users: List[TestUser], image_paths: List[Path], fake) -> List
     for user in users:
         for p_idx in range(POSTS_PER_USER):
             title, body, _tags = generate_post_content(fake)
+            summary = body[:240].replace("\n", " ") + ("..." if len(body) > 240 else "")
             img_path = image_paths[image_index % len(image_paths)]
             image_index += 1
 
             try:
-                media_url = upload_to_cloudinary(img_path)
-                post      = create_post(user, [media_url], title, body)
+                media_url = upload_image_for_post(user, img_path)
+                post      = create_post(user, media_url, title, body, summary, category_id)
                 user.posts.append(post)
                 all_posts.append(post)
             except Exception as exc:
@@ -509,7 +605,11 @@ def _extract_media_ids(posts: List[dict]) -> List[str]:
             v = post.get(key)
             if isinstance(v, list):
                 for item in v:
-                    raw_id = item.get("id") or item.get("mediaId") if isinstance(item, dict) else item
+                    raw_id = (
+                        item.get("mediaId") or item.get("id")
+                        if isinstance(item, dict)
+                        else item
+                    )
                     if raw_id is not None:
                         ids.append(str(raw_id))
                 break
@@ -643,14 +743,13 @@ def validate_rest_recommendations(users: List[TestUser]) -> None:
             continue
         try:
             resp = requests.get(
-                f"{BACKEND_BASE_URL}/api/recommendations",
+                f"{_api_base()}/api/recommendations",
                 params  = {"page": 0, "size": 20},
                 headers = {"Authorization": f"Bearer {user.access_token}"},
                 timeout = 15,
             )
             resp.raise_for_status()
-            body  = resp.json()
-            items = body.get("content") or (body if isinstance(body, list) else [])
+            items = _paginated_content(resp.json())
             icon  = "✓" if items else "⚠ empty"
             log.info("[validate] %s  user=%-28s  recommendations=%d",
                      icon, user.username, len(items))
@@ -677,14 +776,13 @@ def validate_rest_media_search(users: List[TestUser]) -> None:
     for term in search_terms:
         try:
             resp = requests.get(
-                f"{BACKEND_BASE_URL}/api/search/media",
+                f"{_api_base()}/api/search/media",
                 params  = {"q": term, "page": 0, "size": 10},
                 headers = {"Authorization": f"Bearer {user.access_token}"},
                 timeout = 15,
             )
             resp.raise_for_status()
-            body  = resp.json()
-            items = body.get("content") or (body if isinstance(body, list) else [])
+            items = _paginated_content(resp.json())
             log.info("[validate]   search q=%-20r  hits=%d", term, len(items))
         except Exception as exc:
             log.error("[validate] /api/search/media q=%r failed: %s", term, exc)
@@ -841,7 +939,8 @@ def main() -> None:
     log.info("[images] %d image(s) ready in %s", len(image_paths), IMAGE_TMP_DIR)
 
     # ── Phase 2: ingest content ───────────────────────────────────────────────
-    posts = ingest_content(users, image_paths, fake)
+    category_id = resolve_category_id(users[0])
+    posts = ingest_content(users, image_paths, fake, category_id)
     if not posts:
         log.error("No posts created – aborting.")
         sys.exit(1)
