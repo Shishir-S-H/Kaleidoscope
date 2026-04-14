@@ -30,9 +30,10 @@ class MLInsightsResultMessage(BaseModel):
     mediaId: str
     postId: str
     service: str
+    correlationId: str
     timestamp: str
     version: str = "1"
-    
+
     isSafe: Optional[str] = None
     moderationConfidence: Optional[str] = None
     tags: Optional[str] = None
@@ -46,6 +47,7 @@ class FaceDetectionResultMessage(BaseModel):
     postId: str
     facesDetected: str
     faces: str  # JSON-encoded list
+    correlationId: str
     timestamp: str
     version: str = "1"
 

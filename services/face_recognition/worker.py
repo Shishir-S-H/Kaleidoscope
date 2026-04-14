@@ -1,11 +1,9 @@
-import json
 import os
 import signal
 import sys
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -23,6 +21,7 @@ from shared.utils.metrics import (
 from shared.utils.health import check_health
 from shared.providers.registry import get_provider
 from shared.utils.health_server import start_health_server, mark_ready
+from shared.utils.result_publisher import publish_face_detection
 
 LOGGER = get_logger("face-recognition")
 
@@ -69,25 +68,25 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         provider = get_provider("face")
         result = provider.detect(image_bytes)
 
-        formatted_faces_list = []
-        for face in result.faces:
-            formatted_faces_list.append({
+        formatted_faces_list = [
+            {
                 "faceId": face.face_id,
                 "bbox": face.bbox,
                 "embedding": face.embedding,
                 "confidence": face.confidence,
-            })
+            }
+            for face in result.faces
+        ]
 
-        result_message = {
-            "mediaId": str(media_id),
-            "postId": str(post_id),
-            "facesDetected": str(result.faces_detected),
-            "faces": json.dumps(formatted_faces_list),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "version": "1",
-        }
-
-        publisher.publish(STREAM_OUTPUT, result_message)
+        publish_face_detection(
+            publisher,
+            STREAM_OUTPUT,
+            media_id=str(media_id),
+            post_id=str(post_id),
+            correlation_id=correlation_id,
+            faces_detected=result.faces_detected,
+            faces=formatted_faces_list,
+        )
         LOGGER.info("Published result", extra={
             "media_id": media_id,
             "faces_detected": result.faces_detected,

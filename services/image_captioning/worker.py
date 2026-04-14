@@ -1,11 +1,9 @@
-import json
 import os
 import signal
 import sys
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -23,6 +21,7 @@ from shared.utils.metrics import (
 from shared.utils.health import check_health
 from shared.providers.registry import get_provider
 from shared.utils.health_server import start_health_server, mark_ready
+from shared.utils.result_publisher import publish_ml_insight
 
 LOGGER = get_logger("image-captioning")
 
@@ -69,16 +68,15 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         provider = get_provider("captioning")
         result = provider.caption(image_bytes)
 
-        result_message = {
-            "mediaId": str(media_id),
-            "postId": str(post_id),
-            "service": "captioning",
-            "caption": result.caption,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "version": "1",
-        }
-
-        publisher.publish(STREAM_OUTPUT, result_message)
+        publish_ml_insight(
+            publisher,
+            STREAM_OUTPUT,
+            media_id=str(media_id),
+            post_id=str(post_id),
+            service="image_captioning",
+            correlation_id=correlation_id,
+            caption=result.caption,
+        )
         LOGGER.info("Published result", extra={
             "media_id": media_id,
             "stream": STREAM_OUTPUT,

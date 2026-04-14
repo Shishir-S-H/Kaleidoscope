@@ -1,14 +1,5 @@
-{
-"project_context": {
-"name": "Kaleidoscope",
-"deployment": "Dockerized microservices via SSH, with external DB and Cloudinary",
-"ci_cd": "GitHub Actions"
-},
-"rules": [
-"When orchestrating deployments, ALWAYS verify the Git working tree is clean after committing.",
-"Do not assume CI/CD finishes instantly. If the GitHub CLI ('gh') is unavailable to poll action status, explicitly pause and ask the user to confirm CI/CD success before proceeding.",
-"Before running stress tests, ALWAYS verify the health of the target services (e.g., check 'docker ps' or ping the backend health endpoint).",
-"Acknowledge that external services (Database, Cloudinary) rely strictly on the local '.env' file. Ensure test scripts load this file via 'python-dotenv'.",
-"At the end of any automated test run, provide the user with explicit, copy-pasteable terminal commands to manually cross-verify the results in the database or logs."
-]
-}
+# AI Services Domain Rules
+- **Boundary**: Do not propose or apply changes to `/frontend` or `/backend` (Node.js/Go/Java) directories.
+- **Mode**: Diagnostic Only. Focus on identifying logic gaps in event publishing, message schemas, and data transformations.
+- **Post-id Context**: References to Post 162 in logs indicate successful worker execution but persistence failure; prioritize checking the "Result Publisher" logic in the AI workers.
+- **Tech Stack**: Focus on Python, ML frameworks, and the event-bus (RabbitMQ/Kafka) integration used by the AI services.
