@@ -54,6 +54,9 @@ from dotenv import load_dotenv
 
 # Load repo-root .env before CONFIG (module-level os.getenv reads).
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+# If unset, BACKEND_BASE_URL defaults to http://localhost:8080 — on a Docker host
+# where the API is only exposed via nginx/HTTPS, set e.g.
+#   BACKEND_BASE_URL=https://your-domain.example
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration  –  override any value via environment variable
