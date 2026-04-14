@@ -768,9 +768,10 @@ def wait_for_pipeline(posts: List[dict]) -> Dict[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 4 – Recommendation & search validation
 # ─────────────────────────────────────────────────────────────────────────────
-# REST endpoints (Java):
-#   GET /api/recommendations?page=0&size=20       → Page<PostDTO>
-#   GET /api/search/media?q=<term>&page=0&size=10 → Page<MediaResultDTO>
+# REST endpoints (Java) — canonical paths used by this script:
+#   GET /api/posts/suggestions?page=0&size=20   → personalized feed (PostSuggestionService)
+#   GET /api/posts?q=<term>&page=0&size=10      → filter/search posts (same as legacy /api/search/media)
+# Nginx may also alias /api/recommendations → suggestions and /api/search/media → /api/posts.
 #
 # Direct Elasticsearch checks (Python owns recommendations_knn + media_search):
 #   Index: recommendations_knn
@@ -788,14 +789,14 @@ def _es_client():
 
 
 def validate_rest_recommendations(users: List[TestUser]) -> None:
-    """Call /api/recommendations for each user; log item counts."""
-    log.info("[validate] GET /api/recommendations …")
+    """GET /api/posts/suggestions (personalized recommendations feed)."""
+    log.info("[validate] GET /api/posts/suggestions …")
     for user in users:
         if not user.access_token:
             continue
         try:
             resp = requests.get(
-                f"{_api_base()}/api/recommendations",
+                f"{_api_base()}/api/posts/suggestions",
                 params  = {"page": 0, "size": 20},
                 headers = {"Authorization": f"Bearer {user.access_token}"},
                 timeout = 15,
@@ -803,20 +804,18 @@ def validate_rest_recommendations(users: List[TestUser]) -> None:
             resp.raise_for_status()
             items = _paginated_content(resp.json())
             icon  = "✓" if items else "⚠ empty"
-            log.info("[validate] %s  user=%-28s  recommendations=%d",
+            log.info("[validate] %s  user=%-28s  suggestions=%d",
                      icon, user.username, len(items))
         except Exception as exc:
-            log.error("[validate] /api/recommendations failed for %s: %s",
+            log.error("[validate] /api/posts/suggestions failed for %s: %s",
                       user.username, exc)
 
 
 def validate_rest_media_search(users: List[TestUser]) -> None:
     """
-    Call /api/search/media with several AI-relevant terms; log hit counts.
-    Uses a representative pool of terms that the tagging/scene workers would
-    commonly produce for real photographs sourced from picsum.photos.
+    GET /api/posts?q=… (post filter / full-text search; same query shape as legacy /api/search/media).
     """
-    log.info("[validate] GET /api/search/media …")
+    log.info("[validate] GET /api/posts (q=…) …")
     user = next((u for u in users if u.access_token), None)
     if not user:
         return
@@ -828,7 +827,7 @@ def validate_rest_media_search(users: List[TestUser]) -> None:
     for term in search_terms:
         try:
             resp = requests.get(
-                f"{_api_base()}/api/search/media",
+                f"{_api_base()}/api/posts",
                 params  = {"q": term, "page": 0, "size": 10},
                 headers = {"Authorization": f"Bearer {user.access_token}"},
                 timeout = 15,
@@ -837,7 +836,7 @@ def validate_rest_media_search(users: List[TestUser]) -> None:
             items = _paginated_content(resp.json())
             log.info("[validate]   search q=%-20r  hits=%d", term, len(items))
         except Exception as exc:
-            log.error("[validate] /api/search/media q=%r failed: %s", term, exc)
+            log.error("[validate] /api/posts q=%r failed: %s", term, exc)
 
 
 def validate_es_recommendations_knn(completed_ids: List[str]) -> None:
@@ -871,23 +870,13 @@ def validate_es_recommendations_knn(completed_ids: List[str]) -> None:
         log.info("[validate-es] %d/%d COMPLETED items found in recommendations_knn",
                  found, min(len(completed_ids), 10))
 
-        # KNN probe: zero-vector surfaces whatever is actually indexed
-        probe     = [0.0] * 512
-        knn_resp  = es.search(
-            index = "recommendations_knn",
-            body  = {
-                "knn": {
-                    "field":          "image_embedding",
-                    "query_vector":   probe,
-                    "k":              5,
-                    "num_candidates": 50,
-                    "filter":         {"term": {"is_safe": True}},
-                }
-            },
-        )
-        knn_hits = knn_resp["hits"]["hits"]
-        log.info("[validate-es] KNN probe → %d hit(s) from recommendations_knn",
-                 len(knn_hits))
+        # Index health: document count (cosine KNN rejects zero-magnitude vectors; skip zero-vector probe)
+        try:
+            cnt = es.count(index="recommendations_knn")
+            log.info("[validate-es] recommendations_knn total document count: %s",
+                     cnt.get("count"))
+        except Exception as cnt_exc:
+            log.warning("[validate-es] recommendations_knn count: %s", cnt_exc)
 
     except Exception as exc:
         log.error("[validate-es] recommendations_knn validation failed: %s", exc)
