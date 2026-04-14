@@ -9,7 +9,7 @@ Pipeline under test
 ───────────────────
   POST /api/auth/register → POST /api/auth/login
     → randomuser.me portrait → PUT /api/users/profile (backend → Cloudinary + DB)
-    → per post: signed Cloudinary upload (persistent face ~70% / new face ~30%)
+    → per post: PIL composite “group photo” (author + 1–N peers) → Cloudinary upload
       → POST /api/posts  { title, body, mediaUrls[] }
         → Redis: post-image-processing
           → media_preprocessor → ml-inference-tasks
@@ -29,7 +29,7 @@ DTOs.  Java enforces consent before publishing to Redis, so creating a valid
 account is the only prerequisite.
 
 Dependencies (pip install):
-  requests faker psycopg2-binary elasticsearch python-dotenv
+  requests faker psycopg2-binary elasticsearch python-dotenv Pillow
 
 Environment variables (see CONFIG block below). A `.env` file at the repo root
 is loaded automatically via python-dotenv (override with real env vars as needed).
@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from PIL import Image
 import requests
 from dotenv import load_dotenv
 
@@ -100,8 +101,9 @@ IMAGE_HEIGHT        = int(os.getenv("IMAGE_HEIGHT", "600"))
 STRESS_RANDOMUSER_API_URL   = os.getenv("STRESS_RANDOMUSER_API_URL", "https://randomuser.me/api/")
 STRESS_FACE_API_DELAY_S     = float(os.getenv("STRESS_FACE_API_DELAY_S", "0.45"))
 STRESS_FACE_DOWNLOAD_RETRIES = int(os.getenv("STRESS_FACE_DOWNLOAD_RETRIES", "5"))
-# ~70% of post images reuse identity_image_path; ~30% use a fresh random face.
-STRESS_SELFIE_RATIO         = float(os.getenv("STRESS_SELFIE_RATIO", "0.7"))
+# Composite group-photo row (author + random peers from the stress user pool)
+STRESS_COMPOSITE_MAX_FRIENDS = int(os.getenv("STRESS_COMPOSITE_MAX_FRIENDS", "2"))
+STRESS_COMPOSITE_ROW_HEIGHT  = int(os.getenv("STRESS_COMPOSITE_ROW_HEIGHT", "400"))
 
 # Monotonic index for randomuser.me pacing + unique seeds (identity + per-post extras).
 _stress_face_download_seq = 0
@@ -332,6 +334,71 @@ def _synthetic_jpeg(index: int) -> Path:
     )
     log.warning("[image] wrote synthetic fallback JPEG to %s", dest)
     return dest
+
+
+def _pil_resample_high_quality():
+    try:
+        return Image.Resampling.LANCZOS  # Pillow 10+
+    except AttributeError:
+        return getattr(Image, "LANCZOS", Image.BICUBIC)
+
+
+def create_composite_group_photo(
+    author: TestUser,
+    all_users: List[TestUser],
+    max_friends: int = 2,
+) -> Path:
+    """
+    Horizontal collage: author face (always) + 1..max_friends other users from
+    the stress pool. Images are resized to a common row height, then stitched
+    left-to-right for multi-face AI testing.
+    """
+    if not author.identity_image_path:
+        raise ValueError("author.identity_image_path is required")
+
+    others = [u for u in all_users if u is not author and u.identity_image_path]
+    resample = _pil_resample_high_quality()
+    target_h = max(64, STRESS_COMPOSITE_ROW_HEIGHT)
+
+    paths: List[Path] = [author.identity_image_path]
+    if others:
+        n_pick = random.randint(1, min(max_friends, len(others)))
+        friends = random.sample(others, n_pick)
+        for f in friends:
+            if f.identity_image_path:
+                paths.append(f.identity_image_path)
+
+    resized: List[Image.Image] = []
+    for p in paths:
+        with Image.open(p) as im:
+            rgb = im.convert("RGB")
+            w, h = rgb.size
+            if h <= 0:
+                continue
+            new_w = max(1, int(round(w * (target_h / float(h)))))
+            resized.append(rgb.resize((new_w, target_h), resample))
+
+    if not resized:
+        raise RuntimeError("create_composite_group_photo: no valid images")
+
+    total_w = sum(im.width for im in resized)
+    row = Image.new("RGB", (total_w, target_h), color=(24, 24, 24))
+    x = 0
+    for im in resized:
+        row.paste(im, (x, 0))
+        x += im.width
+
+    out_dir = Path(os.getenv("STRESS_COMPOSITE_TMP", "/tmp"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"group_{uuid.uuid4().hex}.jpg"
+    row.save(out_path, "JPEG", quality=92, optimize=True)
+    log.info(
+        "[composite] %d face(s) in strip (author + %d peer(s)) → %s",
+        len(resized),
+        len(resized) - 1,
+        out_path.name,
+    )
+    return out_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -627,14 +694,18 @@ def setup_users(n: int, fake) -> List[TestUser]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_post(
-    user:        TestUser,
-    media_url:   str,
-    title:       str,
-    body:        str,
-    summary:     str,
-    category_id: int,
+    user:         TestUser,
+    media_url:    str,
+    title:        str,
+    body:         str,
+    summary:      str,
+    category_id:  int,
+    media_width:  Optional[int] = None,
+    media_height: Optional[int] = None,
 ) -> dict:
     """Create a post; returns `data` PostCreationResponseDTO as dict."""
+    mw = media_width if media_width is not None else IMAGE_WIDTH
+    mh = media_height if media_height is not None else IMAGE_HEIGHT
     payload = {
         "title":        title,
         "body":         body,
@@ -645,8 +716,8 @@ def create_post(
                 "url":              media_url,
                 "mediaType":        "IMAGE",
                 "position":         0,
-                "width":            IMAGE_WIDTH,
-                "height":           IMAGE_HEIGHT,
+                "width":            mw,
+                "height":           mh,
                 "fileSizeKb":       None,
                 "durationSeconds":  None,
                 "extraMetadata":    None,
@@ -679,11 +750,10 @@ def ingest_content(
     category_id: int,
 ) -> List[dict]:
     """
-    For every user × POSTS_PER_USER, pick an image source and upload to
-    Cloudinary (signed POST), then create the post.
-
-    ~STRESS_SELFIE_RATIO of posts reuse the user's persistent identity_image_path;
-    the remainder download a fresh randomuser.me face (different stranger).
+    For every user × POSTS_PER_USER, build a PIL composite “group photo”
+    (author + random peers from the same stress run), upload to Cloudinary,
+    then create the post. Requires Phase 1 to have populated identity paths
+    for the full user pool.
     """
     all_posts: List[dict] = []
 
@@ -692,30 +762,39 @@ def ingest_content(
             title, body, _tags = generate_post_content(fake)
             summary = body[:240].replace("\n", " ") + ("..." if len(body) > 240 else "")
 
-            use_selfie = random.random() < STRESS_SELFIE_RATIO
-            if use_selfie and user.identity_image_path is not None:
-                img_path = user.identity_image_path
-                src = "identity"
-            else:
-                if use_selfie and user.identity_image_path is None:
-                    log.warning(
-                        "[ingest] no identity_image_path for %s — using random face",
-                        user.username,
-                    )
-                img_path = download_random_image(_next_face_download_index())
-                src = "random"
-
+            composite_path: Optional[Path] = None
             try:
-                media_url = upload_image_for_post(user, img_path)
-                post      = create_post(user, media_url, title, body, summary, category_id)
+                composite_path = create_composite_group_photo(
+                    user,
+                    users,
+                    max_friends=STRESS_COMPOSITE_MAX_FRIENDS,
+                )
+                with Image.open(composite_path) as im:
+                    cw, ch = im.size
+                media_url = upload_image_for_post(user, composite_path)
+                post = create_post(
+                    user,
+                    media_url,
+                    title,
+                    body,
+                    summary,
+                    category_id,
+                    media_width=cw,
+                    media_height=ch,
+                )
                 user.posts.append(post)
                 all_posts.append(post)
-                log.debug("[ingest] image source=%s  user=%s  post_idx=%d", src, user.username, p_idx)
             except Exception as exc:
                 log.error("[ingest] user=%s post=%d failed: %s",
                           user.username, p_idx, exc)
+            finally:
+                if composite_path is not None:
+                    try:
+                        composite_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
-    log.info("[phase-2] %d posts created across %d users", len(all_posts), len(users))
+    log.info("[phase-2] %d posts created across %d users (PIL group composites)", len(all_posts), len(users))
     return all_posts
 
 
@@ -1097,8 +1176,11 @@ def main() -> None:
     log.info("  Database : %s:%d/%s", DB_HOST, DB_PORT, DB_NAME)
     log.info("  ES       : %s", ES_HOST)
     log.info("  Users    : %d   Posts/user: %d", NUM_USERS, POSTS_PER_USER)
-    log.info("  Selfie ratio (identity vs random face): %.0f%% / %.0f%%",
-             STRESS_SELFIE_RATIO * 100, (1.0 - STRESS_SELFIE_RATIO) * 100)
+    log.info(
+        "  Group photo: row height=%d px  max extra faces=%d",
+        STRESS_COMPOSITE_ROW_HEIGHT,
+        STRESS_COMPOSITE_MAX_FRIENDS,
+    )
     log.info("═══════════════════════════════════════════════════")
 
     fake = _build_faker()
@@ -1109,7 +1191,19 @@ def main() -> None:
         log.error("No users created – aborting.")
         sys.exit(1)
 
-    # ── Phase 2: ingest content (70/30 image split per post) ─────────────────
+    ready = [u for u in users if u.identity_image_path]
+    if len(ready) < len(users):
+        log.warning(
+            "[phase] %d/%d users missing identity_image_path — composites may degrade",
+            len(users) - len(ready),
+            len(users),
+        )
+    log.info(
+        "[phase] Phase 1 complete — %d user(s) with identity faces; starting Phase 2 (group-photo posts).",
+        len(ready),
+    )
+
+    # ── Phase 2: composite group-photo posts (full peer pool from Phase 1) ───
     category_id = resolve_category_id(users[0])
     posts = ingest_content(users, fake, category_id)
     if not posts:
