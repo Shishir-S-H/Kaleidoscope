@@ -8,8 +8,9 @@ pipeline.
 Pipeline under test
 ───────────────────
   POST /api/auth/register → POST /api/auth/login
-    → Cloudinary upload (local /tmp image)
-      → POST /api/posts  { title, body, mediaUrls[] }
+    → randomuser.me large portrait → PUT /api/users/profile (persistent identity)
+    → per post: 70% identity image / 30% new random face
+      → signed Cloudinary upload (post media) → POST /api/posts  { title, body, mediaUrls[] }
         → Redis: post-image-processing
           → media_preprocessor → ml-inference-tasks
             → content_moderation / image_tagger / scene_recognition
@@ -39,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
 import sys
 import time
@@ -74,8 +76,8 @@ ES_HOST             = os.getenv("ES_HOST",              "http://localhost:9200")
 ES_USER             = os.getenv("ES_USER",              "elastic")
 ES_PASSWORD         = os.getenv("ES_PASSWORD",          "") or os.getenv("ELASTICSEARCH_PASSWORD", "")
 
-NUM_USERS           = int(os.getenv("STRESS_NUM_USERS",     "3"))
-POSTS_PER_USER      = int(os.getenv("STRESS_POSTS_PER_USER", "2"))
+NUM_USERS           = int(os.getenv("STRESS_NUM_USERS",     "10"))
+POSTS_PER_USER      = int(os.getenv("STRESS_POSTS_PER_USER", "5"))
 # If unset, the first category from GET /api/categories is used (requires auth).
 STRESS_CATEGORY_ID  = os.getenv("STRESS_CATEGORY_ID", "").strip()
 
@@ -87,10 +89,14 @@ POLL_TIMEOUT_S      = float(os.getenv("POLL_TIMEOUT_S",  "300"))   # 5 min max
 CLOUDINARY_MAX_RETRIES  = int(os.getenv("CLOUDINARY_MAX_RETRIES",   "3"))
 CLOUDINARY_RETRY_BASE_S = float(os.getenv("CLOUDINARY_RETRY_BASE_S", "2.0"))
 
-# Image download
+# Image download (face portraits for face_recognition / ML pipeline)
 IMAGE_TMP_DIR       = Path(os.getenv("IMAGE_TMP_DIR", "/tmp/kaleidoscope_stress"))
 IMAGE_WIDTH         = int(os.getenv("IMAGE_WIDTH",  "800"))
 IMAGE_HEIGHT        = int(os.getenv("IMAGE_HEIGHT", "600"))
+# randomuser.me + portrait download: pacing and retries (avoid rate limits / bans)
+STRESS_RANDOMUSER_API_URL   = os.getenv("STRESS_RANDOMUSER_API_URL", "https://randomuser.me/api/")
+STRESS_FACE_API_DELAY_S     = float(os.getenv("STRESS_FACE_API_DELAY_S", "0.45"))
+STRESS_FACE_DOWNLOAD_RETRIES = int(os.getenv("STRESS_FACE_DOWNLOAD_RETRIES", "5"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -116,6 +122,8 @@ class TestUser:
     user_id:      Optional[str] = None
     access_token: Optional[str] = None
     posts:        List[dict]    = field(default_factory=list)
+    # Local JPEG from randomuser.me (large portrait) — persistent “selfie” for ~70% of posts
+    identity_image_path: Optional[Path] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,69 +194,95 @@ def generate_post_content(fake) -> Tuple[str, str, List[str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 0b – Dynamic image sourcing  (picsum.photos)
+# Phase 0b – Face portraits (randomuser.me)
 # ─────────────────────────────────────────────────────────────────────────────
-# We use https://picsum.photos/<w>/<h>  which redirects to a real photograph.
-# Adding ?random=<n> avoids the CDN returning the same byte-sequence for every
-# call, which helps exercise the AI workers with varied content.
+# We fetch JSON from https://randomuser.me/api/ (no API key) and download
+# picture.large so every stress image contains a real human face — required to
+# exercise face_recognition and related workers reliably.
+# STRESS_FACE_API_DELAY_S spaces out calls when generating many posts/users.
 # ─────────────────────────────────────────────────────────────────────────────
+
+_face_download_seq = 0
+
+
+def _next_face_download_index() -> int:
+    global _face_download_seq
+    _face_download_seq += 1
+    return _face_download_seq
+
 
 def download_random_image(index: int) -> Path:
     """
-    Download a unique random JPEG from picsum.photos and save it to IMAGE_TMP_DIR.
-    Returns the local Path of the saved file.
+    Download a unique portrait JPEG (guaranteed human face) and save under
+    IMAGE_TMP_DIR (default: /tmp/kaleidoscope_stress) with a unique filename.
+    Returns the local Path — same contract as the legacy picsum-based helper.
 
-    The ?random query parameter is a per-call unique integer so each request
-    fetches a different photograph even within the same test run.
+    Flow: GET randomuser.me JSON → picture.large (fallback: medium, thumbnail) →
+    GET binary image. Retries with backoff on errors / empty payloads.
     """
     IMAGE_TMP_DIR.mkdir(parents=True, exist_ok=True)
     dest = IMAGE_TMP_DIR / f"stress_{index:04d}_{uuid.uuid4().hex[:8]}.jpg"
 
-    # Use a unique seed so picsum.photos returns different images each call.
-    # The /seed/<seed>/<w>/<h> endpoint is deterministic per seed, so combining
-    # the loop index with a run-level UUID guarantees uniqueness.
-    run_seed = f"stress_{index}_{uuid.uuid4().hex[:12]}"
-    url = f"https://picsum.photos/seed/{run_seed}/{IMAGE_WIDTH}/{IMAGE_HEIGHT}"
+    # Rate-limit every randomuser.me + portrait fetch (public API etiquette / avoid bans).
+    time.sleep(STRESS_FACE_API_DELAY_S)
 
-    log.info("[image] downloading %s → %s", url, dest.name)
-    resp = requests.get(url, timeout=30, allow_redirects=True)
-    resp.raise_for_status()
-
-    content_type = resp.headers.get("Content-Type", "")
-    if "image" not in content_type:
-        raise ValueError(f"Unexpected Content-Type from picsum: {content_type!r}")
-
-    dest.write_bytes(resp.content)
-    log.info("[image] saved %d bytes to %s", len(resp.content), dest)
-    return dest
-
-
-def download_images_for_run(total_posts: int) -> List[Path]:
-    """
-    Pre-download one unique image per post so each post gets distinct content.
-    Failures are logged but do not abort the run; a previously-downloaded image
-    is reused as a fallback.
-    """
-    paths: List[Path] = []
-    fallback: Optional[Path] = None
-
-    for i in range(total_posts):
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, STRESS_FACE_DOWNLOAD_RETRIES + 1):
         try:
-            p = download_random_image(i)
-            paths.append(p)
-            fallback = p
-        except Exception as exc:
-            log.warning("[image] download %d failed: %s", i, exc)
-            if fallback:
-                log.warning("[image] reusing %s as fallback", fallback.name)
-                paths.append(fallback)
-            else:
-                # Last resort: tiny synthetic JPEG (1×1 white pixel)
-                synthetic = _synthetic_jpeg(i)
-                paths.append(synthetic)
-                fallback = synthetic
+            if attempt > 1:
+                time.sleep(STRESS_FACE_API_DELAY_S * (2 ** (attempt - 2)))
 
-    return paths
+            # Unique seed per call → different synthetic identity / portrait each time.
+            api_params = {
+                "inc": "picture",
+                "noinfo": "",
+                "seed": f"stress-{index}-{uuid.uuid4().hex}",
+            }
+            log.info(
+                "[image] randomuser.me (attempt %d/%d) → %s",
+                attempt,
+                STRESS_FACE_DOWNLOAD_RETRIES,
+                dest.name,
+            )
+            api_resp = requests.get(
+                STRESS_RANDOMUSER_API_URL,
+                params=api_params,
+                timeout=30,
+            )
+            api_resp.raise_for_status()
+            payload = api_resp.json()
+            results = payload.get("results") or []
+            if not results:
+                raise ValueError("randomuser.me returned empty results")
+
+            picture = results[0].get("picture") or {}
+            # High-quality face: require `large` (128×128 crop in API; still the canonical HD slot).
+            img_url = picture.get("large")
+            if not img_url:
+                raise ValueError("randomuser.me response missing picture.large")
+
+            log.info("[image] downloading portrait %s …", img_url[:100])
+            img_resp = requests.get(img_url, timeout=45, allow_redirects=True)
+            img_resp.raise_for_status()
+
+            ctype = img_resp.headers.get("Content-Type", "")
+            if "image" not in ctype.lower():
+                raise ValueError(f"Unexpected Content-Type from portrait URL: {ctype!r}")
+
+            dest.write_bytes(img_resp.content)
+            log.info("[image] saved %d bytes to %s", len(img_resp.content), dest)
+            return dest
+
+        except Exception as exc:
+            last_exc = exc
+            log.warning(
+                "[image] download_random_image attempt %d/%d failed: %s",
+                attempt,
+                STRESS_FACE_DOWNLOAD_RETRIES,
+                exc,
+            )
+
+    raise last_exc  # type: ignore[misc]
 
 
 def _synthetic_jpeg(index: int) -> Path:
@@ -452,6 +486,48 @@ def _login(user: TestUser) -> Optional[TestUser]:
     return user
 
 
+def set_user_profile_picture_from_file(user: TestUser) -> None:
+    """
+    Official profile picture: PUT /api/users/profile (multipart).
+
+    Backend: UserController consumes profilePicture + userData; UserServiceImpl
+    uploads via imageStorageService (Cloudinary-backed). This matches production
+    enrollment (ProfilePictureEventDTO → profile-picture-processing).
+    """
+    if not user.identity_image_path or not user.identity_image_path.exists():
+        raise RuntimeError("identity_image_path missing for profile picture update")
+    user_data = {
+        "username":    user.username,
+        "designation": user.department,
+        "summary":     f"Stress test account ({user.full_name})",
+    }
+    path = user.identity_image_path
+    with open(path, "rb") as fp:
+        files = {
+            "userData": (None, json.dumps(user_data), "application/json"),
+            "profilePicture": (path.name, fp, "image/jpeg"),
+        }
+        resp = requests.put(
+            f"{_api_base()}/api/users/profile",
+            files=files,
+            headers=_auth_headers(user),
+            timeout=120,
+        )
+    resp.raise_for_status()
+    log.info("[profile] profile picture updated for %s", user.username)
+
+
+def download_persistent_identity_face(user: TestUser) -> None:
+    """Download exactly one randomuser.me large portrait into identity_image_path."""
+    idx = _next_face_download_index()
+    user.identity_image_path = download_random_image(idx)
+    log.info(
+        "[identity] persistent face for %s → %s",
+        user.username,
+        user.identity_image_path,
+    )
+
+
 def create_test_user(fake) -> Optional[TestUser]:
     """
     Build a Faker-generated profile, register it, and fall back to login if
@@ -469,10 +545,22 @@ def create_test_user(fake) -> Optional[TestUser]:
     if _register(user):
         _complete_email_verification(user)
         if _login(user):
+            try:
+                download_persistent_identity_face(user)
+                set_user_profile_picture_from_file(user)
+            except Exception as exc:
+                log.error("[identity] hydrate failed for %s: %s", user.username, exc)
+                return None
             return user
 
     # Account may already exist from a prior run — try login only.
     if _login(user):
+        try:
+            download_persistent_identity_face(user)
+            set_user_profile_picture_from_file(user)
+        except Exception as exc:
+            log.error("[identity] hydrate failed for %s: %s", user.username, exc)
+            return None
         return user
 
     log.error("[user] could not register or log in as %s", user.email)
@@ -555,24 +643,37 @@ def create_post(
 
 def ingest_content(
     users:       List[TestUser],
-    image_paths: List[Path],
     fake,
     category_id: int,
 ) -> List[dict]:
     """
-    For every user × POSTS_PER_USER, upload the pre-downloaded image to
-    Cloudinary, then create the post.  Content (title, body) is Faker-generated
-    per post.  Returns all successfully created PostDTOs.
+    For every user × POSTS_PER_USER: pick image with a 70/30 split —
+    70% reuse the user's persistent identity_image_path (“selfie”),
+    30% download a fresh randomuser.me face (new identity per post).
+
+    Each image uses the existing signed Cloudinary upload + POST /api/posts flow.
     """
     all_posts: List[dict] = []
-    image_index = 0
 
     for user in users:
         for p_idx in range(POSTS_PER_USER):
             title, body, _tags = generate_post_content(fake)
             summary = body[:240].replace("\n", " ") + ("..." if len(body) > 240 else "")
-            img_path = image_paths[image_index % len(image_paths)]
-            image_index += 1
+
+            use_identity = random.random() < 0.7
+            img_path: Optional[Path] = None
+            if use_identity and user.identity_image_path and user.identity_image_path.exists():
+                img_path = user.identity_image_path
+            else:
+                try:
+                    idx = _next_face_download_index()
+                    img_path = download_random_image(idx)
+                except Exception as exc:
+                    log.warning("[ingest] fresh face download failed (%s) — fallback", exc)
+                    if user.identity_image_path and user.identity_image_path.exists():
+                        img_path = user.identity_image_path
+                    else:
+                        img_path = _synthetic_jpeg(_next_face_download_index())
 
             try:
                 media_url = upload_image_for_post(user, img_path)
@@ -974,14 +1075,9 @@ def main() -> None:
         log.error("No users created – aborting.")
         sys.exit(1)
 
-    # ── Phase 0b: pre-download unique images ─────────────────────────────────
-    total_posts = len(users) * POSTS_PER_USER
-    image_paths = download_images_for_run(total_posts)
-    log.info("[images] %d image(s) ready in %s", len(image_paths), IMAGE_TMP_DIR)
-
-    # ── Phase 2: ingest content ───────────────────────────────────────────────
+    # ── Phase 2: ingest content (70% identity / 30% fresh face per post) ─────
     category_id = resolve_category_id(users[0])
-    posts = ingest_content(users, image_paths, fake, category_id)
+    posts = ingest_content(users, fake, category_id)
     if not posts:
         log.error("No posts created – aborting.")
         sys.exit(1)
