@@ -458,7 +458,7 @@ def create_test_user(fake) -> Optional[TestUser]:
     )
 
     if _register(user):
-        # Registration does not return a JWT; obtain token via login.
+        _complete_email_verification(user)
         if _login(user):
             return user
 
@@ -627,6 +627,42 @@ def _open_pg_connection():
         password = DB_PASSWORD,
         connect_timeout = 10,
     )
+
+
+def _fetch_pending_verification_code(email: str) -> Optional[str]:
+    """Read pending email verification token (registration leaves account DEACTIVATED)."""
+    import psycopg2.extras
+
+    conn = _open_pg_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT verification_code FROM email_verifications "
+                "WHERE email = %s AND status = 'pending' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (email,),
+            )
+            row = cur.fetchone()
+            return str(row["verification_code"]) if row else None
+    finally:
+        conn.close()
+
+
+def _complete_email_verification(user: TestUser) -> None:
+    """GET /api/auth/verify-email?token=… so login can succeed (ACTIVE status)."""
+    code = _fetch_pending_verification_code(user.email)
+    if not code:
+        log.debug("[verify] no pending code for %s — may already be active", user.email)
+        return
+    r = requests.get(
+        f"{_api_base()}/api/auth/verify-email",
+        params={"token": code},
+        timeout=25,
+    )
+    if r.status_code != 200:
+        log.warning("[verify] verify-email HTTP %s for %s", r.status_code, user.email)
+    else:
+        log.info("[verify] email activated for %s", user.email)
 
 
 def _query_media_statuses(media_ids: List[str]) -> Dict[str, str]:
