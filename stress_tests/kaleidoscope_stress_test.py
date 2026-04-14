@@ -72,7 +72,7 @@ if _spring_jdbc.startswith("jdbc:postgresql://"):
         DB_NAME = _m.group(3)
 ES_HOST             = os.getenv("ES_HOST",              "http://localhost:9200")
 ES_USER             = os.getenv("ES_USER",              "elastic")
-ES_PASSWORD         = os.getenv("ES_PASSWORD",          "")
+ES_PASSWORD         = os.getenv("ES_PASSWORD",          "") or os.getenv("ELASTICSEARCH_PASSWORD", "")
 
 NUM_USERS           = int(os.getenv("STRESS_NUM_USERS",     "3"))
 POSTS_PER_USER      = int(os.getenv("STRESS_POSTS_PER_USER", "2"))
