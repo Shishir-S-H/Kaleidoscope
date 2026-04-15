@@ -13,7 +13,7 @@ from shared.providers.types import TaggingResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.5-flash")
 _TAG_PROMPT = (
     "Analyse this image and return the {top_n} most relevant descriptive tags "
     "as a JSON array of lowercase strings. "

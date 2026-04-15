@@ -11,7 +11,7 @@ from shared.providers.types import CaptioningResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.5-flash")
 _CAPTION_PROMPT = (
     "Describe this image in one concise sentence. "
     "Focus on the main subject and key visual elements."

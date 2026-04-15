@@ -31,9 +31,19 @@ LOGGER = get_logger("dlq-processor")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_INPUT = "ai-processing-dlq"
-STREAM_RETRY = "post-image-processing"
 CONSUMER_GROUP = "dlq-processor-group"
 CONSUMER_NAME = "dlq-processor-worker-1"
+
+# Services that consume from ml-inference-tasks (carry localFilePath, not mediaUrl).
+# Retrying these via post-image-processing would cause media_preprocessor to reject
+# them because the message format is wrong. Route them back to the correct stream.
+_ML_INFERENCE_SERVICES = {"tagging", "scene_recognition", "image_captioning", "image_embedding"}
+
+
+def _retry_stream_for(service_name: str) -> str:
+    if service_name in _ML_INFERENCE_SERVICES:
+        return "ml-inference-tasks"
+    return "post-image-processing"
 
 DLQ_AUTO_RETRY = os.getenv("DLQ_AUTO_RETRY", "false").lower() in ("true", "1", "yes")
 
@@ -110,9 +120,10 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
         })
 
         if DLQ_AUTO_RETRY:
+            target_stream = _retry_stream_for(service_name)
             LOGGER.info("Auto-retry enabled, re-publishing to retry stream", extra={
                 "original_message_id": original_message_id,
-                "retry_stream": STREAM_RETRY,
+                "retry_stream": target_stream,
                 "failed_service": service_name,
             })
 
@@ -123,9 +134,9 @@ def handle_message(message_id: str, data: dict, publisher: RedisStreamPublisher)
             retry_message["dlqOriginalService"] = service_name
             retry_message["dlqOriginalMessageId"] = str(original_message_id)
 
-            publisher.publish(STREAM_RETRY, retry_message)
+            publisher.publish(target_stream, retry_message)
             LOGGER.info("Message re-published for retry", extra={
-                "retry_stream": STREAM_RETRY,
+                "retry_stream": target_stream,
                 "original_message_id": original_message_id,
                 "failed_service": service_name,
             })
@@ -158,11 +169,11 @@ def _signal_handler(signum, frame):
 def main():
     LOGGER.info("DLQ Processor Worker starting")
     LOGGER.info("Configuration", extra={
-        "redis_url": REDIS_URL,
-        "input_stream": STREAM_INPUT,
-        "auto_retry": DLQ_AUTO_RETRY,
-        "retry_stream": STREAM_RETRY if DLQ_AUTO_RETRY else "N/A",
-    })
+            "redis_url": REDIS_URL,
+            "input_stream": STREAM_INPUT,
+            "auto_retry": DLQ_AUTO_RETRY,
+            "retry_stream": "dynamic (ml-inference-tasks or post-image-processing)" if DLQ_AUTO_RETRY else "N/A",
+        })
 
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)

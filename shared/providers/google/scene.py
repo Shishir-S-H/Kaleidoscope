@@ -13,7 +13,7 @@ from shared.providers.types import SceneResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.5-flash")
 
 _SCENE_PROMPT = """\
 Identify the primary scene or setting depicted in this image.
