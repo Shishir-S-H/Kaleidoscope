@@ -78,6 +78,10 @@ INDEX_MAPPING = {
     "known_faces_index": ("read_model_known_faces", "known_faces_index"),
 }
 
+# Index types published by the Java layer that intentionally bypass this worker.
+# Messages with these types are silently skipped to avoid noisy error logs.
+JAVA_OWNED_INDEX_TYPES = {"post_search", "user_search", "media_search"}
+
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
@@ -640,7 +644,10 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         
         mapping = INDEX_MAPPING.get(index_type)
         if not mapping:
-            LOGGER.error(f"Unknown index type: {index_type}", extra={"available_types": list(INDEX_MAPPING.keys())})
+            if index_type in JAVA_OWNED_INDEX_TYPES:
+                LOGGER.debug("Skipping Java-owned index type: %s", index_type)
+            else:
+                LOGGER.error("Unknown index type: %s", index_type, extra={"available_types": list(INDEX_MAPPING.keys())})
             return
         
         table_name, es_index_name = mapping
@@ -698,6 +705,7 @@ def main():
 
     consumer = None
     sync_handler = None
+    batch_actions: list = []
 
     try:
         sync_handler = ElasticsearchSyncHandler(ES_HOST)
@@ -716,7 +724,6 @@ def main():
 
         BATCH_SIZE = int(os.getenv("ES_SYNC_BATCH_SIZE", "50"))
         BATCH_TIMEOUT = float(os.getenv("ES_SYNC_BATCH_TIMEOUT", "2.0"))
-        batch_actions: list = []
         batch_start = time.time()
 
         start_health_server(
@@ -760,7 +767,10 @@ def main():
 
             mapping = INDEX_MAPPING.get(index_type)
             if not mapping:
-                LOGGER.error("Unknown index type: %s", index_type, extra={"available_types": list(INDEX_MAPPING.keys())})
+                if index_type in JAVA_OWNED_INDEX_TYPES:
+                    LOGGER.debug("Skipping Java-owned index type: %s", index_type)
+                else:
+                    LOGGER.error("Unknown index type: %s", index_type, extra={"available_types": list(INDEX_MAPPING.keys())})
                 return
 
             table_name, es_index_name = mapping

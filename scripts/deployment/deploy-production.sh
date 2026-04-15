@@ -29,6 +29,7 @@ AI_SERVICES=(
     "image_tagger"
     "scene_recognition"
     "image_captioning"
+    "image_embedding"
     "face_recognition"
     "post_aggregator"
     "es_sync"
