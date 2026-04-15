@@ -234,12 +234,12 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - AI_PLATFORM=${AI_PLATFORM:-google}
       - TAGGING_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
-      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-1.5-flash}
+      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-2.0-flash-001}
     depends_on:
       redis:
         condition: service_healthy
@@ -262,12 +262,12 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
       - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
-      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - AI_PLATFORM=${AI_PLATFORM:-google}
       - SCENE_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
-      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-1.5-flash}
+      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-2.0-flash-001}
     depends_on:
       redis:
         condition: service_healthy
@@ -289,12 +289,12 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - AI_PLATFORM=${AI_PLATFORM:-google}
       - CAPTIONING_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
-      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-1.5-flash}
+      - GOOGLE_GEMINI_MODEL=${GOOGLE_GEMINI_MODEL:-gemini-2.0-flash-001}
     depends_on:
       redis:
         condition: service_healthy
@@ -376,6 +376,25 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+
+  dlq_processor:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-dlq_processor:latest
+    pull_policy: always
+    container_name: dlq_processor
+    restart: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - DLQ_AUTO_RETRY=${DLQ_AUTO_RETRY:-false}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kaleidoscope-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   es_sync:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-es_sync:latest

@@ -1,4 +1,4 @@
-"""Google Gemini 1.5 Flash image captioning provider."""
+"""Google Gemini image captioning provider."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from shared.providers.types import CaptioningResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-1.5-flash")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
 _CAPTION_PROMPT = (
     "Describe this image in one concise sentence. "
     "Focus on the main subject and key visual elements."
@@ -19,7 +19,7 @@ _CAPTION_PROMPT = (
 
 
 class GoogleCaptioningProvider(GoogleBaseProvider, BaseCaptioningProvider):
-    """Image captioning using Gemini 1.5 Flash."""
+    """Image captioning using Gemini (model controlled by GOOGLE_GEMINI_MODEL env var)."""
 
     def __init__(self) -> None:
         self._bootstrap()

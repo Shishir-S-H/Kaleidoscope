@@ -1,4 +1,4 @@
-"""Google Gemini 1.5 Flash image tagging provider."""
+"""Google Gemini image tagging provider."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from shared.providers.types import TaggingResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-1.5-flash")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
 _TAG_PROMPT = (
     "Analyse this image and return the {top_n} most relevant descriptive tags "
     "as a JSON array of lowercase strings. "
@@ -23,7 +23,7 @@ _TAG_PROMPT = (
 
 
 class GoogleTaggerProvider(GoogleBaseProvider, BaseTaggerProvider):
-    """Image tagging using Gemini 1.5 Flash."""
+    """Image tagging using Gemini (model controlled by GOOGLE_GEMINI_MODEL env var)."""
 
     def __init__(self) -> None:
         self._bootstrap()

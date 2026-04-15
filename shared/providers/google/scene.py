@@ -1,4 +1,4 @@
-"""Google Gemini 1.5 Flash scene recognition provider."""
+"""Google Gemini scene recognition provider."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from shared.providers.types import SceneResult
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-1.5-flash")
+_MODEL = os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash-001")
 
 _SCENE_PROMPT = """\
 Identify the primary scene or setting depicted in this image.
@@ -32,7 +32,7 @@ If custom labels are provided, prefer them: {labels}
 
 
 class GoogleSceneProvider(GoogleBaseProvider, BaseSceneProvider):
-    """Scene recognition using Gemini 1.5 Flash."""
+    """Scene recognition using Gemini (model controlled by GOOGLE_GEMINI_MODEL env var)."""
 
     def __init__(self) -> None:
         self._bootstrap()

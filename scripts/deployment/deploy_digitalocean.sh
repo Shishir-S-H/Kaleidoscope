@@ -104,7 +104,7 @@ ufw --force enable
 
 # Deploy services
 print_status "Deploying Kaleidoscope AI services..."
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Wait for services to start
 print_status "Waiting for services to start..."
@@ -112,52 +112,35 @@ sleep 30
 
 # Check service status
 print_status "Checking service status..."
-docker-compose -f docker-compose.prod.yml ps
-
-# Test services
-print_status "Testing services..."
+docker compose -f docker-compose.prod.yml ps
 
 # Test Redis
-if docker exec kaleidoscope-ai-redis-1 redis-cli ping | grep -q "PONG"; then
+source .env 2>/dev/null || true
+if docker exec redis redis-cli -a "${REDIS_PASSWORD:-}" ping 2>/dev/null | grep -q "PONG"; then
     print_status "✅ Redis is running"
 else
     print_error "❌ Redis is not responding"
 fi
 
 # Test Elasticsearch
-if curl -s http://localhost:9200 | grep -q "elasticsearch"; then
+if curl -sf -u "elastic:${ELASTICSEARCH_PASSWORD:-}" http://localhost:9200/_cluster/health 2>/dev/null | grep -q '"status"'; then
     print_status "✅ Elasticsearch is running"
 else
     print_error "❌ Elasticsearch is not responding"
 fi
 
-# Test AI Services
-services=("8001:Content Moderation" "8002:Image Tagger" "8003:Scene Recognition" "8004:Image Captioning" "8005:Face Recognition" "8006:Post Aggregator" "8007:ES Sync")
-
-for service in "${services[@]}"; do
-    port=$(echo $service | cut -d: -f1)
-    name=$(echo $service | cut -d: -f2)
-    
-    if curl -s http://localhost:$port/health | grep -q "healthy"; then
-        print_status "✅ $name is running on port $port"
+# Test AI worker containers
+AI_WORKERS=(image_tagger image_captioning scene_recognition content_moderation face_recognition post_aggregator es_sync dlq_processor)
+for svc in "${AI_WORKERS[@]}"; do
+    STATUS=$(docker inspect --format='{{.State.Status}}' "$svc" 2>/dev/null || echo "missing")
+    if [ "$STATUS" = "running" ]; then
+        print_status "✅ $svc is running"
     else
-        print_warning "⚠️  $name on port $port may not be ready yet"
+        print_warning "⚠️  $svc status: $STATUS"
     fi
 done
 
-print_status "🎉 Deployment completed!"
-print_status "Your Kaleidoscope AI services are now running on DigitalOcean"
-print_status "Check logs with: docker-compose -f docker-compose.prod.yml logs -f"
+print_status "Deployment completed!"
+print_status "Run verification: python3 scripts/deployment/verify_google_apis.py"
+print_status "Check logs with: docker compose -f docker-compose.prod.yml logs -f"
 print_status "Monitor resources with: htop"
-
-# Display connection information
-echo ""
-print_status "📋 Connection Information:"
-echo "  - Content Moderation: http://$(curl -s ifconfig.me):8001"
-echo "  - Image Tagger: http://$(curl -s ifconfig.me):8002"
-echo "  - Scene Recognition: http://$(curl -s ifconfig.me):8003"
-echo "  - Image Captioning: http://$(curl -s ifconfig.me):8004"
-echo "  - Face Recognition: http://$(curl -s ifconfig.me):8005"
-echo "  - Post Aggregator: http://$(curl -s ifconfig.me):8006"
-echo "  - ES Sync: http://$(curl -s ifconfig.me):8007"
-echo "  - Elasticsearch: http://$(curl -s ifconfig.me):9200"
