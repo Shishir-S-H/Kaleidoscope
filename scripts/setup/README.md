@@ -29,6 +29,27 @@ chmod +x scripts/setup/run_recreate_es_indices.sh
 ./scripts/setup/run_recreate_es_indices.sh
 ```
 
+### Full cluster wipe (`--wipe-cluster`)
+
+Deletes **every** index that does **not** start with `.` (so `posts`, `users`, `blogs`, `media_search`, … all go away). Then upserts the ILM policy from `es_mappings/ilm_policy.json` and recreates the **seven** indices that have JSON mappings in this repo.
+
+**After a wipe**, restart the Spring Boot backend (`kaleidoscope-app`) so it repopulates Java-owned indices from PostgreSQL (`ElasticsearchStartupSyncService`).
+
+```bash
+export ES_HOST="http://elastic:YOUR_PASSWORD@localhost:9200"
+python scripts/setup/setup_es_indices.py --wipe-cluster
+# Skip ILM upsert: add --no-ilm
+```
+
+**On the droplet:**
+
+```bash
+cd ~/Kaleidoscope
+chmod +x scripts/setup/run_wipe_cluster_es_indices.sh
+./scripts/setup/run_wipe_cluster_es_indices.sh
+# To skip ILM: SKIP_ILM=1 ./scripts/setup/run_wipe_cluster_es_indices.sh
+```
+
 **What it does**:
 - Creates 7 Elasticsearch indices:
   - `media_search`
