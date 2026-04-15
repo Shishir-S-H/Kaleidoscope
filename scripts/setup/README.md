@@ -12,7 +12,13 @@ Creates all 7 Elasticsearch indices with proper mappings and settings.
 
 **Usage**:
 ```bash
+# Create any indices that are missing (does not change existing indices)
 python scripts/setup/setup_es_indices.py
+
+# Drop all mapped indices (including media_search_v2 / recommendations_knn_v2)
+# and recreate from current es_mappings/*.json — use after DB wipe / mapping changes
+export ES_HOST="http://elastic:YOUR_PASSWORD@localhost:9200"
+python scripts/setup/setup_es_indices.py --recreate
 ```
 
 **What it does**:
