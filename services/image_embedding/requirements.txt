@@ -5,3 +5,5 @@ python-dotenv>=1.0.0
 Pillow>=10.0.0
 huggingface_hub>=0.25.0
 numpy>=1.24.0
+google-cloud-aiplatform>=1.57
+vertexai>=1.57

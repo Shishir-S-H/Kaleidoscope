@@ -45,8 +45,8 @@ class FaceResult:
 
     face_id: str
     bbox: list[int]
-    embedding: list[float]
     confidence: float
+    embedding: list[float] = field(default_factory=list)
 
 
 @dataclass

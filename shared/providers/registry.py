@@ -121,5 +121,24 @@ def _register_defaults() -> None:
     except ImportError as e:
         logger.warning("Failed to register default HuggingFace providers: %s", e)
 
+    try:
+        from shared.providers.google.moderation import GoogleModerationProvider
+        from shared.providers.google.tagger import GoogleTaggerProvider
+        from shared.providers.google.scene import GoogleSceneProvider
+        from shared.providers.google.captioning import GoogleCaptioningProvider
+        from shared.providers.google.face import GoogleFaceProvider
+        from shared.providers.google.embedding import GoogleEmbeddingProvider
+
+        register(TASK_MODERATION, "google", GoogleModerationProvider)
+        register(TASK_TAGGING,    "google", GoogleTaggerProvider)
+        register(TASK_SCENE,      "google", GoogleSceneProvider)
+        register(TASK_CAPTIONING, "google", GoogleCaptioningProvider)
+        register(TASK_FACE,       "google", GoogleFaceProvider)
+        register(TASK_EMBEDDING,  "google", GoogleEmbeddingProvider)
+    except ImportError as e:
+        logger.warning(
+            "Google providers not available (google-cloud-* SDKs not installed): %s", e
+        )
+
 
 _register_defaults()
