@@ -182,7 +182,8 @@ class RedisStreamConsumer:
         handler: Callable,
         block_ms: int = 5000,
         count: int = 10,
-        auto_create_group: bool = True
+        auto_create_group: bool = True,
+        idle_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Start consuming messages from the stream.
@@ -193,6 +194,8 @@ class RedisStreamConsumer:
             block_ms: Milliseconds to block waiting for new messages
             count: Maximum number of messages to read per call
             auto_create_group: Automatically create consumer group if needed
+            idle_callback: Optional callback invoked when XREADGROUP returns no messages
+                (e.g. after block_ms elapses). Use for time-based batch flush in workers.
         """
         if auto_create_group:
             self.create_consumer_group(start_id="0")
@@ -224,6 +227,11 @@ class RedisStreamConsumer:
                 )
                 
                 if not messages:
+                    if idle_callback:
+                        try:
+                            idle_callback()
+                        except Exception as cb_err:
+                            logger.error("idle_callback failed: %s", cb_err, exc_info=True)
                     continue
                 
                 for stream_name, stream_messages in messages:

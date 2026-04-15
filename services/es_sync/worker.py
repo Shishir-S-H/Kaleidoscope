@@ -795,9 +795,19 @@ def main():
             elif time.time() - batch_start >= BATCH_TIMEOUT and batch_actions:
                 _flush_batch()
 
+        def flush_batch_if_idle():
+            """Flush when no new Redis messages arrive but batch_timeout has elapsed."""
+            if batch_actions and time.time() - batch_start >= BATCH_TIMEOUT:
+                _flush_batch()
+
         LOGGER.info("Worker ready — waiting for sync requests (batch_size=%d, batch_timeout=%.1fs)", BATCH_SIZE, BATCH_TIMEOUT)
         
-        consumer.consume(message_handler, block_ms=int(BATCH_TIMEOUT * 1000), count=BATCH_SIZE)
+        consumer.consume(
+            message_handler,
+            block_ms=int(BATCH_TIMEOUT * 1000),
+            count=BATCH_SIZE,
+            idle_callback=flush_batch_if_idle,
+        )
         
     except KeyboardInterrupt:
         LOGGER.warning("Interrupted by user")
