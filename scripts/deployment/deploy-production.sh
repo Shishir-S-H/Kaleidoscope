@@ -66,6 +66,14 @@ if ! ssh "${SSH_HOST}" "test -d ${REMOTE_DIR}" 2>/dev/null; then
 fi
 print_status "Remote directory verified"
 
+# Sync repo on remote so docker-compose.prod.yml and scripts are up to date
+print_step "Syncing repo on remote..."
+if ssh "${SSH_HOST}" "cd ${REMOTE_DIR} && git pull origin main"; then
+    print_status "✓ Repo synced successfully"
+else
+    print_warning "⚠ git pull failed — continuing with existing files on server"
+fi
+
 # Pull latest backend image
 print_step "Pulling latest backend image..."
 BACKEND_IMAGE="${DOCKER_REGISTRY_BACKEND}/kaleidoscope:backend-${APP_VERSION}"
@@ -102,6 +110,29 @@ print_status "docker-compose.prod.yml found"
 print_step "Stopping existing services..."
 ssh "${SSH_HOST}" "cd ${REMOTE_DIR} && docker-compose -f docker-compose.prod.yml down" || true
 print_status "Services stopped"
+
+# Refresh recommendations_knn ES mapping (512-dim → 1408-dim for Vertex AI)
+# The index must be recreated whenever the dense_vector dims change.
+print_step "Refreshing recommendations_knn Elasticsearch mapping..."
+ES_PASS=$(ssh "${SSH_HOST}" "grep ELASTICSEARCH_PASSWORD ${REMOTE_DIR}/.env | cut -d= -f2")
+if [ -n "${ES_PASS}" ]; then
+    # Delete the old index (ignore 404 if it doesn't exist yet)
+    ssh "${SSH_HOST}" "curl -s -o /dev/null -w '%{http_code}' \
+        -u elastic:${ES_PASS} \
+        -X DELETE http://localhost:9200/recommendations_knn" || true
+    # Recreate with the 1408-dim mapping
+    if ssh "${SSH_HOST}" "cd ${REMOTE_DIR} && curl -s -f \
+        -u elastic:${ES_PASS} \
+        -X PUT http://localhost:9200/recommendations_knn \
+        -H 'Content-Type: application/json' \
+        -d @es_mappings/recommendations_knn.json"; then
+        print_status "✓ recommendations_knn index recreated with 1408-dim mapping"
+    else
+        print_warning "⚠ Failed to recreate recommendations_knn mapping (ES may not be running yet — will retry after startup)"
+    fi
+else
+    print_warning "⚠ Could not read ELASTICSEARCH_PASSWORD — skipping ES mapping refresh"
+fi
 
 # Start services with new images
 print_step "Starting services with latest images..."

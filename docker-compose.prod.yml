@@ -159,10 +159,11 @@ services:
     restart: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      # Same face Space/endpoint as face_recognition (HFFaceProvider contract).
-      - HF_FACE_API_URL=${HF_API_URL_FACE_RECOGNITION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-      - FACE_EMBEDDING_DIM=${FACE_EMBEDDING_DIM:-1024}
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - FACE_PLATFORM=google
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
+      - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -206,10 +207,8 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_API_URL=${HF_API_URL_CONTENT_MODERATION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - MODERATION_PLATFORM=${MODERATION_PLATFORM:-}
+      - MODERATION_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
@@ -235,10 +234,8 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_API_URL=${HF_API_URL_IMAGE_TAGGER}
-      - HF_API_TOKEN=${HF_API_TOKEN}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - TAGGING_PLATFORM=${TAGGING_PLATFORM:-}
+      - TAGGING_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
@@ -264,11 +261,9 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_API_URL=${HF_API_URL_SCENE_RECOGNITION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
       - SCENE_LABELS=${SCENE_LABELS:-beach,mountains,urban,office,restaurant,forest,desert,lake,park,indoor,outdoor,rural,coastal,mountainous,tropical,arctic}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - SCENE_PLATFORM=${SCENE_PLATFORM:-}
+      - SCENE_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
@@ -294,10 +289,8 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_API_URL=${HF_API_URL_IMAGE_CAPTIONING}
-      - HF_API_TOKEN=${HF_API_TOKEN}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - CAPTIONING_PLATFORM=${CAPTIONING_PLATFORM:-}
+      - CAPTIONING_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
@@ -323,11 +316,8 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_API_URL=${HF_API_URL_FACE_RECOGNITION}
-      - HF_API_TOKEN=${HF_API_TOKEN}
-      - FACE_EMBEDDING_DIM=${FACE_EMBEDDING_DIM:-1024}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - FACE_PLATFORM=${FACE_PLATFORM:-}
+      - FACE_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
@@ -352,10 +342,8 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
-      - HF_EMBEDDING_API_URL=${HF_API_URL_IMAGE_EMBEDDING}
-      - HF_API_TOKEN=${HF_API_TOKEN}
       - AI_PLATFORM=${AI_PLATFORM:-huggingface}
-      - EMBEDDING_PLATFORM=${EMBEDDING_PLATFORM:-}
+      - EMBEDDING_PLATFORM=google
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_CLOUD_REGION=${GOOGLE_CLOUD_REGION:-us-central1}
       - GOOGLE_CREDENTIALS_BASE64=${GOOGLE_CREDENTIALS_BASE64:-}
