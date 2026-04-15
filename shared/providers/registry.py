@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple, Type
 
 from shared.providers.base import (
     BaseCaptioningProvider,
+    BaseEmbeddingProvider,
     BaseFaceProvider,
     BaseModerationProvider,
     BaseSceneProvider,
@@ -20,6 +21,7 @@ TASK_TAGGING = "tagging"
 TASK_SCENE = "scene"
 TASK_CAPTIONING = "captioning"
 TASK_FACE = "face"
+TASK_EMBEDDING = "embedding"
 
 # Maps (task, platform) -> provider class
 _REGISTRY: Dict[Tuple[str, str], Type] = {}
@@ -108,12 +110,14 @@ def _register_defaults() -> None:
         from shared.providers.huggingface.scene import HFSceneProvider
         from shared.providers.huggingface.captioning import HFCaptioningProvider
         from shared.providers.huggingface.face import HFFaceProvider
+        from shared.providers.huggingface.embedding import HFEmbeddingProvider
 
         register(TASK_MODERATION, "huggingface", HFModerationProvider)
         register(TASK_TAGGING, "huggingface", HFTaggerProvider)
         register(TASK_SCENE, "huggingface", HFSceneProvider)
         register(TASK_CAPTIONING, "huggingface", HFCaptioningProvider)
         register(TASK_FACE, "huggingface", HFFaceProvider)
+        register(TASK_EMBEDDING, "huggingface", HFEmbeddingProvider)
     except ImportError as e:
         logger.warning("Failed to register default HuggingFace providers: %s", e)
 

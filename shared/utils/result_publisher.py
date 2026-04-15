@@ -37,6 +37,7 @@ def publish_ml_insight(
     tags: Optional[List[str]] = None,
     scenes: Optional[List[str]] = None,
     caption: Optional[str] = None,
+    image_embedding: Optional[List[float]] = None,
 ) -> str:
     """Build, validate, and publish a single MLInsightsResultMessage.
 
@@ -67,6 +68,8 @@ def publish_ml_insight(
         message["scenes"] = json.dumps(scenes)
     if caption is not None:
         message["caption"] = caption
+    if image_embedding is not None:
+        message["imageEmbedding"] = json.dumps(image_embedding)
 
     validate_outgoing(message, MLInsightsResultMessage)
     return publisher.publish(stream, message)

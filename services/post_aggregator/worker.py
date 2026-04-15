@@ -43,10 +43,10 @@ CONSUMER_NAME = "post-aggregator-worker-1"
 INSIGHTS_STREAM = "ml-insights-results"
 FACES_STREAM = "face-detection-results"
 
-AGGREGATION_WAIT_SECONDS = float(os.getenv("AGGREGATION_WAIT_SECONDS", "6"))
+AGGREGATION_WAIT_SECONDS = float(os.getenv("AGGREGATION_WAIT_SECONDS", "15"))
 AGGREGATION_POLL_INTERVAL = float(os.getenv("AGGREGATION_POLL_INTERVAL", "0.5"))
 REQUIRED_SERVICES: Set[str] = {"moderation", "tagging", "scene_recognition", "image_captioning"}
-OPTIONAL_SERVICES: Set[str] = {"face"}
+OPTIONAL_SERVICES: Set[str] = {"face", "image_embedding"}
 
 # LLM caption summarization (optional)
 USE_LLM_CAPTIONS = os.getenv("USE_LLM_CAPTIONS", "false").lower() in ("true", "1", "yes")

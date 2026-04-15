@@ -22,6 +22,7 @@ jobs:
           - media_preprocessor
           - profile_enrollment
           - face_matcher
+          - image_embedding
           - dlq_processor
           - federated_aggregator
 

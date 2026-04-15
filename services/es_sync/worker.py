@@ -297,8 +297,8 @@ class ElasticsearchSyncHandler:
             "read_model_post_search": "post_id",
             "read_model_user_search": "user_id",
             "read_model_face_search": "face_id",
-            "read_model_recommendations_knn": "user_id",
-            "read_model_feed_personalized": "user_id",
+            "read_model_recommendations_knn": "media_id",
+            "read_model_feed_personalized": "media_id",
             "read_model_known_faces": "face_id"
         }
         return pk_mapping.get(table_name, "id")

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 
 from shared.providers.types import (
     CaptioningResult,
+    EmbeddingResult,
     FaceDetectionResult,
     ModerationResult,
     SceneResult,
@@ -86,3 +87,16 @@ class BaseFaceProvider(ABC):
     @abstractmethod
     def detect(self, image_bytes: bytes) -> FaceDetectionResult:
         """Detect faces and return bounding-boxes + embeddings."""
+
+
+class BaseEmbeddingProvider(ABC):
+    """Generate a dense vector embedding for an image."""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Return the provider platform name."""
+
+    @abstractmethod
+    def embed(self, image_bytes: bytes) -> EmbeddingResult:
+        """Return a fixed-dimension embedding vector for the image."""

@@ -55,3 +55,11 @@ class FaceDetectionResult:
 
     faces_detected: int
     faces: list[FaceResult] = field(default_factory=list)
+
+
+@dataclass
+class EmbeddingResult:
+    """Result of image feature extraction / embedding."""
+
+    embedding: list[float]
+    dimensions: int

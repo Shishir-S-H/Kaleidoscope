@@ -39,6 +39,7 @@ class MLInsightsResultMessage(BaseModel):
     tags: Optional[str] = None
     scenes: Optional[str] = None
     caption: Optional[str] = None
+    imageEmbedding: Optional[str] = None
 
 
 class FaceDetectionResultMessage(BaseModel):

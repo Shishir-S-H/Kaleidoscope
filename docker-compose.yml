@@ -111,21 +111,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # text_embedding:
-  #   build: ./services/text_embedding
-  #   ports:
-  #     - "8008:8008"
-  #   volumes:
-  #     - ./services/text_embedding:/app
-  #   restart: always
-  #   environment:
-  #     - CLIP_MODEL_NAME=ViT-B-32
-  #     - CLIP_PRETRAINED=openai
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
+  image_embedding:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-image_embedding:latest
+    pull_policy: always
+    volumes:
+      - ./local_media_cache:/tmp/kaleidoscope_media
+    restart: always
+    env_file:
+      - ./shared/env_templates/image_embedding.env
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AI_PLATFORM=${AI_PLATFORM:-huggingface}
+      - SHARED_MEDIA_DIR=/tmp/kaleidoscope_media
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # minio:
   #   image: minio/minio:latest
@@ -188,11 +198,59 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  profile_enrollment:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-profile_enrollment:latest
+    pull_policy: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - HF_FACE_API_URL=${HF_FACE_API_URL:-}
+      - HF_API_TOKEN=${HF_API_TOKEN:-}
+    depends_on:
+      - redis
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  face_matcher:
+    image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-face_matcher:latest
+    pull_policy: always
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - ES_HOST=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD required}@elasticsearch:9200
+      - KNN_CONFIDENCE_THRESHOLD=${KNN_CONFIDENCE_THRESHOLD:-0.85}
+    depends_on:
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   post_aggregator:
     image: ${DOCKER_USERNAME:-shishir01}/kaleidoscope-post_aggregator:latest
     pull_policy: always
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+      - AGGREGATION_WAIT_SECONDS=15
     depends_on:
       - redis
     restart: always
