@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import NotFoundError, RequestError
 
@@ -39,6 +40,21 @@ LEGACY_INDICES = [
     "media_search_v2",
     "recommendations_knn_v2",
 ]
+
+
+def _redact_es_host(url: str) -> str:
+    """Mask password in http(s)://user:pass@host URLs for logging."""
+    try:
+        p = urlsplit(url)
+        if p.username or p.password:
+            host = p.hostname or ""
+            port = f":{p.port}" if p.port else ""
+            user = p.username or ""
+            netloc = f"{user}:***@{host}{port}"
+            return urlunsplit((p.scheme, netloc, p.path, p.query, p.fragment))
+    except Exception:
+        pass
+    return url
 
 
 def load_mapping(index_name: str) -> dict:
@@ -124,7 +140,7 @@ def main() -> None:
     print("=" * 60)
     print("Kaleidoscope AI - Elasticsearch Index Setup")
     print("=" * 60)
-    print(f"Elasticsearch Host: {es_host}")
+    print(f"Elasticsearch Host: {_redact_es_host(es_host)}")
     print(f"Mappings Directory: {MAPPINGS_DIR}")
     print(f"Mode: {'RECREATE (delete + create)' if args.recreate else 'create-if-missing'}")
     print()
