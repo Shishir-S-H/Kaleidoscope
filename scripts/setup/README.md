@@ -21,6 +21,14 @@ export ES_HOST="http://elastic:YOUR_PASSWORD@localhost:9200"
 python scripts/setup/setup_es_indices.py --recreate
 ```
 
+**On the droplet (recommended)** — avoids shell quoting issues; reads `ELASTICSEARCH_PASSWORD` from `.env`:
+
+```bash
+cd ~/Kaleidoscope
+chmod +x scripts/setup/run_recreate_es_indices.sh
+./scripts/setup/run_recreate_es_indices.sh
+```
+
 **What it does**:
 - Creates 7 Elasticsearch indices:
   - `media_search`
