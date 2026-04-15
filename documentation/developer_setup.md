@@ -88,12 +88,15 @@ DOCKER_USERNAME=shishir01
 # Required — create a token at https://huggingface.co/settings/tokens
 HF_API_TOKEN=hf_...your_token_here...
 
-# HuggingFace Space endpoints — one per AI service (Required)
-HF_API_URL_CONTENT_MODERATION=https://phantomfury-kaleidoscope-content-moderation.hf.space/classify
-HF_API_URL_IMAGE_TAGGER=https://phantomfury-kaleidoscope-image-tagger.hf.space/tag
-HF_API_URL_SCENE_RECOGNITION=https://phantomfury-kaleidoscope-scene-recognition.hf.space/recognize
-HF_API_URL_IMAGE_CAPTIONING=https://phantomfury-kaleidoscope-image-captioning.hf.space/caption
+# HuggingFace — model IDs use Inference API first; optional HF_*_SPACE_URL fallbacks (see .env.example).
+HF_API_URL_CONTENT_MODERATION=Falconsai/nsfw_image_detection
+HF_API_URL_IMAGE_TAGGER=facebook/convnext-base-384-22k-1k
+HF_API_URL_SCENE_RECOGNITION=corenet-community/places365-224x224-vit-base
+HF_API_URL_IMAGE_CAPTIONING=Salesforce/blip2-opt-2.7b
+# Face: Space API only — https://huggingface.co/spaces/phantomfury/kaleidoscope-face-recognition → use hf.space URL:
 HF_API_URL_FACE_RECOGNITION=https://phantomfury-kaleidoscope-face-recognition.hf.space/detect
+HF_API_URL_IMAGE_EMBEDDING=openai/clip-vit-base-patch16
+FACE_EMBEDDING_DIM=1024
 
 # ── Security ─────────────────────────────────────────────────────────────────
 # Required — use a strong random password in production
