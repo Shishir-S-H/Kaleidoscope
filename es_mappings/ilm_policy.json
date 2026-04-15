@@ -1,6 +1,8 @@
 {
   "policy": {
-    "description": "ILM policy for Kaleidoscope AI indices",
+    "_meta": {
+      "description": "ILM policy for Kaleidoscope AI indices"
+    },
     "phases": {
       "hot": {
         "min_age": "0ms",
