@@ -1,0 +1,57 @@
+From 3b71c8069507baff1048d78ad663f75147abf16d Mon Sep 17 00:00:00 2001
+From: shishir s hebbar <gulliro007@gmail.com>
+Date: Thu, 16 Apr 2026 02:15:48 +0530
+Subject: [PATCH 1/2] fix: guard recommendations_knn ES sync and improve KNN
+ error logging
+
+Guard the recommendations_knn ES sync trigger in MediaAiInsightsConsumer behind
+a null check on savedInsights.getImageEmbedding(). Without an embedding the DB
+row is intentionally skipped by updateRecommendationsKnnReadModel, so triggering
+the sync caused es_sync to log 'Document not found in PostgreSQL' on every
+message where no embedding was present yet.
+
+Add exception class name to the RecommendationsKnnReadModel error log in
+ReadModelUpdateService to make root causes easier to identify from logs.
+---
+ .../backend/async/consumer/MediaAiInsightsConsumer.java  | 9 +++++++--
+ .../backend/async/service/ReadModelUpdateService.java    | 4 ++--
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/backend/src/main/java/com/kaleidoscope/backend/async/consumer/MediaAiInsightsConsumer.java b/backend/src/main/java/com/kaleidoscope/backend/async/consumer/MediaAiInsightsConsumer.java
+index 5532a45..e689d3c 100644
+--- a/backend/src/main/java/com/kaleidoscope/backend/async/consumer/MediaAiInsightsConsumer.java
++++ b/backend/src/main/java/com/kaleidoscope/backend/async/consumer/MediaAiInsightsConsumer.java
+@@ -144,8 +144,13 @@ public class MediaAiInsightsConsumer implements StreamListener<String, MapRecord
+             // 1c. Update the 'read_model_feed_personalized' table
+             readModelUpdateService.updateFeedPersonalizedReadModel(savedInsights, postMedia);
+ 
+-            // 2. Trigger ES Sync for read models still owned by Python sync
+-            elasticsearchSyncTriggerService.triggerSync("read_model_recommendations_knn", postMedia.getMediaId());
++            // 2. Trigger ES Sync for read models still owned by Python sync.
++            // Only fire the recommendations_knn sync when an embedding was actually written;
++            // without an embedding the DB row doesn't exist and es_sync would log
++            // "Document not found in PostgreSQL" for every message.
++            if (savedInsights.getImageEmbedding() != null) {
++                elasticsearchSyncTriggerService.triggerSync("read_model_recommendations_knn", postMedia.getMediaId());
++            }
+             elasticsearchSyncTriggerService.triggerSync("read_model_feed_personalized", postMedia.getMediaId());
+ 
+             // Keep `posts` index fresh for /posts/filter?q=... ML text search
+diff --git a/backend/src/main/java/com/kaleidoscope/backend/async/service/ReadModelUpdateService.java b/backend/src/main/java/com/kaleidoscope/backend/async/service/ReadModelUpdateService.java
+index 2046665..2153297 100644
+--- a/backend/src/main/java/com/kaleidoscope/backend/async/service/ReadModelUpdateService.java
++++ b/backend/src/main/java/com/kaleidoscope/backend/async/service/ReadModelUpdateService.java
+@@ -127,8 +127,8 @@ public class ReadModelUpdateService {
+             recommendationsKnnReadModelRepository.save(readModel);
+             log.info("Successfully updated RecommendationsKnnReadModel for mediaId: {}", postMedia.getMediaId());
+         } catch (Exception e) {
+-            log.error("Failed to update RecommendationsKnnReadModel for mediaId: {}: {}",
+-                    postMedia.getMediaId(), e.getMessage(), e);
++            log.error("Failed to update RecommendationsKnnReadModel for mediaId: {} [{}]: {}",
++                    postMedia.getMediaId(), e.getClass().getSimpleName(), e.getMessage(), e);
+             // Don't re-throw, just log the error
+         }
+     }
+-- 
+2.49.0.windows.1
+

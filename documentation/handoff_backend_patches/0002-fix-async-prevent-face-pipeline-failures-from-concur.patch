@@ -1,0 +1,239 @@
+From 2bc701d35156a7f0e7e61a32591d1ea79bc589d9 Mon Sep 17 00:00:00 2001
+From: shishir s hebbar <gulliro007@gmail.com>
+Date: Thu, 16 Apr 2026 05:17:28 +0530
+Subject: [PATCH 2/2] fix(async): prevent face pipeline failures from
+ concurrent MediaAiInsights updates
+
+- FaceDetectionConsumer: persist faces in one transaction; append face_detection
+  to services_completed in separate transactions with optimistic-lock retries
+- PostAggregationTriggerService: include DB-backed mediaInsights JSON on
+  post-aggregation-trigger so the Python aggregator does not miss ACKed stream history
+---
+ .../async/consumer/FaceDetectionConsumer.java | 47 ++++++++-
+ .../PostAggregationTriggerService.java        | 97 +++++++++++++++++--
+ 2 files changed, 134 insertions(+), 10 deletions(-)
+
+diff --git a/backend/src/main/java/com/kaleidoscope/backend/async/consumer/FaceDetectionConsumer.java b/backend/src/main/java/com/kaleidoscope/backend/async/consumer/FaceDetectionConsumer.java
+index 99f88c1..a8dd82e 100644
+--- a/backend/src/main/java/com/kaleidoscope/backend/async/consumer/FaceDetectionConsumer.java
++++ b/backend/src/main/java/com/kaleidoscope/backend/async/consumer/FaceDetectionConsumer.java
+@@ -20,6 +20,7 @@ import org.slf4j.MDC;
+ import org.springframework.data.redis.connection.stream.MapRecord;
+ import org.springframework.data.redis.stream.StreamListener;
+ import org.springframework.jdbc.core.JdbcTemplate;
++import org.springframework.dao.OptimisticLockingFailureException;
+ import org.springframework.stereotype.Component;
+ import org.springframework.transaction.support.TransactionTemplate;
+ 
+@@ -80,6 +81,10 @@ public class FaceDetectionConsumer implements StreamListener<String, MapRecord<S
+                         "MediaAiInsights not ready yet for mediaId=" + resultDTO.getMediaId(), null);
+             }
+ 
++            // Persist faces + read models in one transaction. Do NOT update MediaAiInsights here:
++            // MediaAiInsightsConsumer updates the same row concurrently; merging versioned saves
++            // causes ObjectOptimisticLockingFailureException and rolls back the whole transaction.
++            final Long mediaIdForAppend = mediaAiInsights.getMediaId();
+             transactionTemplate.executeWithoutResult(status -> {
+                 log.info("Processing {} faces for mediaId: {}", faces.size(), mediaAiInsights.getMediaId());
+ 
+@@ -90,11 +95,12 @@ public class FaceDetectionConsumer implements StreamListener<String, MapRecord<S
+                     log.info("Saved MediaDetectedFace for mediaId: {}, faceId: {}, status: {}",
+                             mediaAiInsights.getMediaId(), savedFace.getId(), savedFace.getStatus());
+                 }
+-
+-                // Mark service completion for downstream observability/idempotency.
+-                appendServiceCompleted(mediaAiInsights, "face_detection");
+             });
+ 
++            // Append face_detection to services_completed in short separate transactions with retries,
++            // so concurrent ML insight updates cannot roll back persisted faces.
++            appendFaceDetectionServiceCompletedWithRetry(mediaIdForAppend);
++
+             log.info("Successfully processed face detection for mediaId: {} and messageId: {}",
+                     resultDTO.getMediaId(), messageId);
+ 
+@@ -315,4 +321,39 @@ public class FaceDetectionConsumer implements StreamListener<String, MapRecord<S
+             mediaAiInsightsRepository.save(mediaAiInsights);
+         }
+     }
++
++    /**
++     * Append {@code face_detection} to {@code services_completed} without racing ML insight updates.
++     * Each attempt loads a fresh entity and runs in its own transaction.
++     */
++    private void appendFaceDetectionServiceCompletedWithRetry(Long mediaId) {
++        final int maxAttempts = 15;
++        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
++            try {
++                transactionTemplate.executeWithoutResult(status -> {
++                    MediaAiInsights fresh = mediaAiInsightsRepository.findByMediaId(mediaId)
++                            .orElseThrow(() -> new IllegalStateException(
++                                    "MediaAiInsights missing while appending face_detection for mediaId=" + mediaId));
++                    appendServiceCompleted(fresh, "face_detection");
++                });
++                return;
++            } catch (OptimisticLockingFailureException ex) {
++                log.warn("Optimistic lock while appending face_detection for mediaId={}, attempt={}/{} — retrying",
++                        mediaId, attempt, maxAttempts);
++                sleepBackoffMs(attempt);
++            }
++        }
++        log.error("Giving up appending face_detection to services_completed for mediaId={} after {} attempts. "
++                        + "Faces are already persisted; reconcile services_completed if needed.",
++                mediaId, maxAttempts);
++    }
++
++    private static void sleepBackoffMs(int attempt) {
++        long delayMs = Math.min(2000L, 50L * attempt * attempt);
++        try {
++            Thread.sleep(delayMs);
++        } catch (InterruptedException ie) {
++            Thread.currentThread().interrupt();
++        }
++    }
+ }
+diff --git a/backend/src/main/java/com/kaleidoscope/backend/async/service/PostAggregationTriggerService.java b/backend/src/main/java/com/kaleidoscope/backend/async/service/PostAggregationTriggerService.java
+index cc98aea..ba17dec 100644
+--- a/backend/src/main/java/com/kaleidoscope/backend/async/service/PostAggregationTriggerService.java
++++ b/backend/src/main/java/com/kaleidoscope/backend/async/service/PostAggregationTriggerService.java
+@@ -1,14 +1,23 @@
+ package com.kaleidoscope.backend.async.service;
+ 
++import com.fasterxml.jackson.core.JsonProcessingException;
++import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.kaleidoscope.backend.async.streaming.ProducerStreamConstants;
++import com.kaleidoscope.backend.posts.model.MediaAiInsights;
++import com.kaleidoscope.backend.posts.model.PostMedia;
++import com.kaleidoscope.backend.posts.repository.MediaAiInsightsRepository;
+ import lombok.RequiredArgsConstructor;
+ import lombok.extern.slf4j.Slf4j;
+ import org.slf4j.MDC;
+ import org.springframework.stereotype.Service;
++
+ import java.time.Instant;
+-import java.util.HashMap;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.util.Optional;
+ import java.util.stream.Collectors;
+ 
+ /**
+@@ -21,6 +30,8 @@ import java.util.stream.Collectors;
+ public class PostAggregationTriggerService {
+ 
+     private final RedisStreamPublisher redisStreamPublisher;
++    private final MediaAiInsightsRepository mediaAiInsightsRepository;
++    private final ObjectMapper objectMapper;
+ 
+     /**
+      * Publishes a message to the post-aggregation-trigger stream.
+@@ -33,19 +44,30 @@ public class PostAggregationTriggerService {
+         try {
+             // Convert list of longs to a comma-separated string for the stream
+             String mediaIdsString = allMediaIds.stream()
+-                                               .map(String::valueOf)
+-                                               .collect(Collectors.joining(","));
++                    .map(String::valueOf)
++                    .collect(Collectors.joining(","));
+ 
+-            Map<String, Object> message = new HashMap<>();
++            Map<String, Object> message = new LinkedHashMap<>();
+             message.put("postId", String.valueOf(postId));
+             message.put("totalMedia", String.valueOf(allMediaIds.size()));
+             message.put("allMediaIds", mediaIdsString);
+             message.put("timestamp", Instant.now().toString());
+             message.put("correlationId", MDC.get("correlationId")); // Pass on the correlation ID
+ 
++            // Snapshot current DB insights so the Python aggregator does not depend on replaying
++            // historical ml-insights-results / face-detection-results (which may already be ACKed).
++            try {
++                String mediaInsightsJson = buildMediaInsightsSnapshot(allMediaIds);
++                if (mediaInsightsJson != null && !mediaInsightsJson.isBlank() && !"[]".equals(mediaInsightsJson)) {
++                    message.put("mediaInsights", mediaInsightsJson);
++                }
++            } catch (Exception e) {
++                log.warn("Could not build mediaInsights snapshot for postId={}: {}", postId, e.getMessage());
++            }
++
+             redisStreamPublisher.publish(
+-                ProducerStreamConstants.POST_AGGREGATION_TRIGGER_STREAM,
+-                message
++                    ProducerStreamConstants.POST_AGGREGATION_TRIGGER_STREAM,
++                    message
+             );
+ 
+             log.info("Successfully published post-aggregation-trigger for postId: {}", postId);
+@@ -54,5 +76,66 @@ public class PostAggregationTriggerService {
+             // Non-blocking error. The trigger can be retried later.
+         }
+     }
+-}
+ 
++    /**
++     * Flat list of per-service insight dicts — matches post_aggregator._merge_media_entry expectations.
++     */
++    private String buildMediaInsightsSnapshot(List<Long> allMediaIds) throws JsonProcessingException {
++        List<Map<String, Object>> entries = new ArrayList<>();
++        for (Long mediaId : allMediaIds) {
++            Optional<MediaAiInsights> opt = mediaAiInsightsRepository.findByMediaId(mediaId);
++            if (opt.isEmpty()) {
++                continue;
++            }
++            MediaAiInsights ai = opt.get();
++            String mid = String.valueOf(mediaId);
++            String mediaUrl = resolveMediaUrl(ai);
++
++            Map<String, Object> moderation = new LinkedHashMap<>();
++            moderation.put("mediaId", mid);
++            moderation.put("service", "moderation");
++            moderation.put("isSafe", Boolean.TRUE.equals(ai.getIsSafe()));
++            moderation.put("mediaUrl", mediaUrl != null ? mediaUrl : "");
++            entries.add(moderation);
++
++            Map<String, Object> tagging = new LinkedHashMap<>();
++            tagging.put("mediaId", mid);
++            tagging.put("service", "tagging");
++            tagging.put("tags", ai.getTags() != null ? Arrays.asList(ai.getTags()) : List.of());
++            entries.add(tagging);
++
++            Map<String, Object> scenes = new LinkedHashMap<>();
++            scenes.put("mediaId", mid);
++            scenes.put("service", "scene_recognition");
++            scenes.put("scenes", ai.getScenes() != null ? Arrays.asList(ai.getScenes()) : List.of());
++            entries.add(scenes);
++
++            Map<String, Object> caption = new LinkedHashMap<>();
++            caption.put("mediaId", mid);
++            caption.put("service", "image_captioning");
++            caption.put("caption", ai.getCaption() != null ? ai.getCaption() : "");
++            entries.add(caption);
++
++            if (ai.getImageEmbedding() != null && !ai.getImageEmbedding().isBlank()) {
++                Map<String, Object> emb = new LinkedHashMap<>();
++                emb.put("mediaId", mid);
++                emb.put("service", "image_embedding");
++                emb.put("hasEmbedding", true);
++                entries.add(emb);
++            }
++        }
++        return objectMapper.writeValueAsString(entries);
++    }
++
++    private static String resolveMediaUrl(MediaAiInsights ai) {
++        try {
++            PostMedia pm = ai.getPostMedia();
++            if (pm == null) {
++                return "";
++            }
++            return pm.getMediaUrl() != null ? pm.getMediaUrl() : "";
++        } catch (Exception e) {
++            return "";
++        }
++    }
++}
+-- 
+2.49.0.windows.1
+
