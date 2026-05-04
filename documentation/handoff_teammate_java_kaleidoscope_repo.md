@@ -15,6 +15,8 @@ This note is for a teammate after the **May 2026** alignment on **1408-dimension
 | **Tests / HF default / `.env.example`** | Face mocks **1408**; `FACE_EMBEDDING_DIM` documented. |
 | **Verification** | `scripts/deployment/verify_google_apis.py`: checks face PG columns (expect **1408**). |
 | **GitHub Actions** | `.github/workflows/build-and-push.yml`: **no SSH deploy**; build + push only. |
+| **es_sync (`services/es_sync/worker.py`)** | **PostgreSQL read retry/backoff** when a read-model row is not visible yet (Java publishes `es-sync-queue` before commit). Env: **`ES_SYNC_PG_READ_MAX_ATTEMPTS`** (default `12`), **`ES_SYNC_PG_READ_BACKOFF_MS`** (`80`), **`ES_SYNC_PG_READ_MAX_BACKOFF_MS`** (`1500`). Single-message and batched paths use **`read_from_postgresql_with_retry`**. |
+| **`verify_post_pipeline.py`** | **`media_search`** Elasticsearch query uses **`term.postId`**, matching Spring Data’s field name (avoids false “no hits” when verifying a post). |
 
 ---
 
@@ -78,9 +80,9 @@ If ML completes but aggregated post search is missing, inspect **`PostAggregatio
 
 ## Part D — What **you** do next (checklist)
 
-1. **kaleidoscope-ai:** wait for **Actions** “Build & Push AI Images”; on server **`git pull`**; **`docker compose pull && up -d`**.  
+1. **kaleidoscope-ai:** merge **`es_sync`** PG retry + **`verify_post_pipeline`** / **`.env.example`** updates; wait for **Actions** “Build & Push AI Images”; on server **`git pull`**; **`docker compose pull && up -d`** (at least **`es_sync`**).  
 2. **Java `Kaleidoscope`:** implement **Part B2** + **B3**, run tests, build **`backend-latest`**, deploy backend image.  
-3. **Verify:** `verify_google_apis.py`, `verify_post_pipeline.py`, and a **new post with faces**.  
+3. **Verify:** `verify_google_apis.py`, **`verify_post_pipeline.py`** (title needle), and a **new post with faces**; confirm **`services_completed`** includes **`face_detection`** and **`media_detected_faces`** row count matches detector output.  
 4. **Forks:** align **`nrashmi06/Kaleidoscope`** vs **`Shishir-S-H/Kaleidoscope`** so `main` does not diverge unintentionally.
 
 ---
@@ -92,11 +94,30 @@ If ML completes but aggregated post search is missing, inspect **`PostAggregatio
 
 ---
 
+## Part F — Suggested fixes checklist (Java backend + kaleidoscope-ai)
+
+Use this as a single backlog after **May 2026** production monitoring (e.g. post **`test-21`**, `post_id=33`: Hikari exhaustion on **`face-detection-results`**, transient **`es_sync`** “document not found” for **`read_model_recommendations_knn`**, **`media_search`** verify query field mismatch).
+
+| Priority | Area | Where | What to do | Status |
+|----------|------|-------|------------|--------|
+| P0 | DB pool | Java `application.yml` | Raise **`spring.datasource.hikari.maximum-pool-size`** from **2** to **10–20** (within Neon pooler limits); tune **`minimum-idle`** so **`MediaAiInsightsConsumer`**, **`FaceDetectionConsumer`**, and API traffic do not stall each other. | **Backend — do** |
+| P0 | Face pipeline | Java **`FaceDetectionConsumer`** (+ related services) | Ensure **all detected faces** persist and **`services_completed`** includes **`face_detection`** under load; align transactions with **`MediaAiInsightsConsumer`** (optimistic lock / short transactions). Consider patches in `documentation/handoff_backend_teammate.md` (**`2bc701d`**). | **Backend — do** |
+| P0 | JPA / ES dimensions | Java entities & docs listed in **Part B2** | Face-related **`vector(1024)`** / **`dims = 1024`** → **1408** everywhere face crops use Vertex **`multimodalembedding@001`**. | **Backend — do** |
+| P1 | Face read model vs PG | Java **`FaceSearchReadModel`**, **`FaceDetectionConsumer`**, **`ReadModelUpdateService`** | Avoid **orphan `read_model_face_search` / ES `face_search`** rows when **`media_detected_faces`** rolls back; single transactional boundary or compensating delete. | **Backend — do** |
+| P1 | Post aggregation | Java **`PostAggregationTriggerService`**, **`PostInsightsEnrichedConsumer`** | If **`read_model_post_search`** is missing after ML, check Redis PEL and DB-backed payloads (see **Part B4**). | **Backend — investigate** |
+| P1 | ES sync race | **kaleidoscope-ai `es_sync`** | **Implemented:** retry/backoff on missing PG row before failing sync (`ES_SYNC_PG_READ_*`). Redeploy **`es_sync`** image after merge. | **AI — done in repo** |
+| P2 | Ops verification | **`scripts/deployment/verify_post_pipeline.py`** | **Implemented:** **`media_search`** query uses **`postId`**. Re-run after backend + AI deploys. | **AI — done in repo** |
+| P2 | Env documentation | **`.env.example`** | **Implemented:** commented **`ES_SYNC_PG_READ_*`** and batch env vars for operators. | **AI — done in repo** |
+| P3 | DLQ health noise | **`dlq_processor`** | Health logs report **“unhealthy”** when idle (success rate 0%); optional tweak so “no traffic yet” is **healthy** or suppressed. | **AI — optional** |
+| P3 | Redis ACK semantics | **`es_sync`** + **`RedisStreamConsumer`** | If PG row **never** appears after all retries, the message may still be **ACKed** (same as before); ops can **republish** to `es-sync-queue`. Optional future: **NACK / DLQ** for hard misses. | **AI — optional / design** |
+
+---
+
 ## Summary
 
 | Location | Status / action |
 |----------|-----------------|
-| **kaleidoscope-ai** | 1408 ES + V4 + CI build-only on `main` (e.g. `4400cc9` on Shishir fork). |
+| **kaleidoscope-ai** | 1408 ES + V4 + CI build-only on `main` (e.g. `4400cc9` on Shishir fork); **`es_sync`** now retries PG reads (`ES_SYNC_PG_READ_*`); **`verify_post_pipeline`** uses **`postId`** for **`media_search`**. |
 | **Prod droplet** | Pulled `4400cc9`, restarted compose, **recreated three ES indices**, **applied V4** via Docker `psql`; startup logs clean. |
 | **Local Java `Kaleidoscope`** | Merged `origin/main` → **`aea0afb`**; **stash dropped**; **still need JPA/ES 1408 + Hikari** per Part B. |
 

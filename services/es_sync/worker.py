@@ -86,6 +86,20 @@ JAVA_OWNED_INDEX_TYPES = {"post_search", "user_search", "media_search"}
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
 
+# PostgreSQL read retries: Java may enqueue es-sync-queue before the read-model row commits.
+ES_SYNC_PG_READ_MAX_ATTEMPTS = max(1, int(os.getenv("ES_SYNC_PG_READ_MAX_ATTEMPTS", "12")))
+ES_SYNC_PG_READ_BACKOFF_MS = float(os.getenv("ES_SYNC_PG_READ_BACKOFF_MS", "80"))
+ES_SYNC_PG_READ_MAX_BACKOFF_MS = float(os.getenv("ES_SYNC_PG_READ_MAX_BACKOFF_MS", "1500"))
+
+
+def _es_sync_pg_backoff_sleep(failed_attempt: int) -> None:
+    """Sleep before the next PG read; failed_attempt is 1-based count of misses so far."""
+    base_sec = ES_SYNC_PG_READ_BACKOFF_MS / 1000.0
+    cap_sec = ES_SYNC_PG_READ_MAX_BACKOFF_MS / 1000.0
+    delay = min(cap_sec, base_sec * (1.55 ** (failed_attempt - 1)))
+    time.sleep(delay)
+
+
 shutdown_event = threading.Event()
 
 
@@ -165,7 +179,13 @@ class ElasticsearchSyncHandler:
             self._init_postgresql()
         return self.pg_pool is not None and not self.pg_pool.closed
     
-    def read_from_postgresql(self, table_name: str, document_id: str) -> Optional[Dict[str, Any]]:
+    def read_from_postgresql(
+        self,
+        table_name: str,
+        document_id: str,
+        *,
+        log_not_found: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """
         Read data from PostgreSQL read model table.
         Automatically handles connection health checking and reconnection.
@@ -173,6 +193,7 @@ class ElasticsearchSyncHandler:
         Args:
             table_name: Name of the read model table
             document_id: Document ID (primary key value)
+            log_not_found: If False, omit warning when no row (used between retries).
             
         Returns:
             Dictionary with row data or None if not found
@@ -208,10 +229,11 @@ class ElasticsearchSyncHandler:
                     })
                     return data
                 else:
-                    self.logger.warning("Document not found in PostgreSQL", extra={
-                        "table": table_name,
-                        "document_id": document_id
-                    })
+                    if log_not_found:
+                        self.logger.warning("Document not found in PostgreSQL", extra={
+                            "table": table_name,
+                            "document_id": document_id
+                        })
                     return None
                     
         except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
@@ -248,10 +270,11 @@ class ElasticsearchSyncHandler:
                             })
                             return data
                         else:
-                            self.logger.warning("Document not found in PostgreSQL (after reconnection)", extra={
-                                "table": table_name,
-                                "document_id": document_id
-                            })
+                            if log_not_found:
+                                self.logger.warning("Document not found in PostgreSQL (after reconnection)", extra={
+                                    "table": table_name,
+                                    "document_id": document_id
+                                })
                             return None
                 except Exception as retry_error:
                     self.logger.error("Error reading from PostgreSQL after reconnection: %s", retry_error, extra={
@@ -285,6 +308,43 @@ class ElasticsearchSyncHandler:
                     self.pg_pool.putconn(conn)
                 except Exception:
                     pass
+    
+    def read_from_postgresql_with_retry(
+        self, table_name: str, document_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Read a read-model row, retrying when the row is not yet visible (commit ordering vs Redis).
+        """
+        max_attempts = ES_SYNC_PG_READ_MAX_ATTEMPTS
+        for attempt in range(1, max_attempts + 1):
+            is_last = attempt == max_attempts
+            row = self.read_from_postgresql(
+                table_name, document_id, log_not_found=is_last
+            )
+            if row:
+                if attempt > 1:
+                    self.logger.info(
+                        "PostgreSQL read succeeded after retry",
+                        extra={
+                            "table": table_name,
+                            "document_id": document_id,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                        },
+                    )
+                return row
+            if attempt < max_attempts:
+                self.logger.debug(
+                    "PostgreSQL row not visible yet; backing off before retry",
+                    extra={
+                        "table": table_name,
+                        "document_id": document_id,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                    },
+                )
+                _es_sync_pg_backoff_sleep(attempt)
+        return None
     
     def _get_primary_key_column(self, table_name: str) -> str:
         """
@@ -655,7 +715,7 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
         if operation == "delete":
             success = sync_handler.delete_document(es_index_name, document_id)
         else:
-            pg_data = sync_handler.read_from_postgresql(table_name, document_id)
+            pg_data = sync_handler.read_from_postgresql_with_retry(table_name, document_id)
 
             if not pg_data:
                 LOGGER.error("Failed to read data from PostgreSQL", extra={
@@ -697,6 +757,12 @@ def handle_message(message_id: str, data: dict, sync_handler: ElasticsearchSyncH
 def main():
     """Main worker function."""
     LOGGER.info("Elasticsearch Sync Worker starting (Redis Streams)")
+    LOGGER.info(
+        "PostgreSQL read retry config: max_attempts=%s initial_backoff_ms=%s max_backoff_ms=%s",
+        ES_SYNC_PG_READ_MAX_ATTEMPTS,
+        ES_SYNC_PG_READ_BACKOFF_MS,
+        ES_SYNC_PG_READ_MAX_BACKOFF_MS,
+    )
     LOGGER.info("Connecting to Elasticsearch", extra={"host": ES_HOST})
     LOGGER.info("Connecting to Redis Streams", extra={"redis_url": REDIS_URL})
 
@@ -778,7 +844,7 @@ def main():
             if operation == "delete":
                 batch_actions.append({"index": es_index_name, "id": document_id, "op": "delete"})
             else:
-                pg_data = sync_handler.read_from_postgresql(table_name, document_id)
+                pg_data = sync_handler.read_from_postgresql_with_retry(table_name, document_id)
                 if not pg_data:
                     LOGGER.error("Failed to read data from PostgreSQL", extra={"table": table_name, "document_id": document_id})
                     return

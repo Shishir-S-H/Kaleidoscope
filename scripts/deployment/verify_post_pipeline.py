@@ -225,7 +225,7 @@ def main():
     except Exception as e:
         print(f"post_search error: {e}")
 
-    print("\n=== Elasticsearch: media_search (post_title or post_id) ===\n")
+    print("\n=== Elasticsearch: media_search (post_title or postId) ===\n")
     try:
         r2 = es_req(
             es_pw,
@@ -236,7 +236,7 @@ def main():
                     "bool": {
                         "should": [
                             {"match": {"post_title": title_needle}},
-                            {"term": {"post_id": int(pid)}},
+                            {"term": {"postId": int(pid)}},
                         ],
                         "minimum_should_match": 1,
                     }
