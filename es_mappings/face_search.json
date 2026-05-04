@@ -21,7 +21,7 @@
       },
       "face_embedding": {
         "type": "dense_vector",
-        "dims": 1024,
+        "dims": 1408,
         "index": true,
         "similarity": "cosine"
       },

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Configurable via FACE_EMBEDDING_DIM env var so the expected dimensionality
 # can be changed without a code deploy when switching face models.
 # Must match the ES index mapping dims for known_faces_index and face_search.
-EXPECTED_EMBEDDING_DIM = int(os.getenv("FACE_EMBEDDING_DIM", "1024"))
+EXPECTED_EMBEDDING_DIM = int(os.getenv("FACE_EMBEDDING_DIM", "1408"))
 
 
 class HFFaceProvider(BaseFaceProvider):

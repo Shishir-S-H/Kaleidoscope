@@ -190,7 +190,7 @@ All endpoints are served by the Java Spring Boot backend at `https://<host>:8080
 |-------|------|-------------|
 | `faceId` | string (UUID) | Unique identifier for this detected face |
 | `bbox` | array `[x, y, w, h]` | Bounding box in pixels |
-| `embedding` | array of float (1024-dim) | Dense face embedding vector |
+| `embedding` | array of float (1408-dim) | Dense face embedding vector |
 | `confidence` | float | Detection confidence 0–1 |
 
 ---
@@ -225,7 +225,7 @@ All endpoints are served by the Java Spring Boot backend at `https://<host>:8080
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `userId` | string | ✅ | User whose profile picture was enrolled |
-| `faceEmbedding` | string (JSON array of float) | ✅ | Extracted 1024-dim face embedding |
+| `faceEmbedding` | string (JSON array of float) | ✅ | Extracted 1408-dim face embedding |
 | `correlationId` | string | ✅ | Trace ID |
 
 ---

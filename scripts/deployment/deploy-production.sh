@@ -9,7 +9,7 @@
 # Flags:
 #   --drain-dlq         After deploy, temporarily enable DLQ auto-retry to replay
 #                       stranded messages, then disable it.
-#   --skip-migration    Skip running V3 SQL migration (use if already applied).
+#   --skip-migration    Skip running V3/V4 SQL migrations (use if already applied).
 #
 # Prerequisites:
 #   - SSH key-based access to root@165.232.179.167
@@ -135,12 +135,42 @@ if [ "${SKIP_MIGRATION}" = false ]; then
       && echo "V3 migration applied successfully." \
       || echo "WARNING: Migration returned non-zero (may already be applied)."
 MIGRATION
+
+  step "Apply V4 face-vector migration (1024 → 1408)"
+  ssh "${SSH_HOST}" "bash -s" << 'MIGRATION_V4'
+    set -e
+    ENV_FILE=~/Kaleidoscope/kaleidoscope-ai/.env
+    MIGRATION_SQL=~/Kaleidoscope/kaleidoscope-ai/migrations/V4__face_embeddings_vector_1408.sql
+
+    [ ! -f "$MIGRATION_SQL" ] && { echo "V4 migration not found — skipping"; exit 0; }
+
+    source "$ENV_FILE" 2>/dev/null || true
+    [ -z "${SPRING_DATASOURCE_URL:-}" ] && { echo "SPRING_DATASOURCE_URL not set — skipping"; exit 0; }
+
+    REST="${SPRING_DATASOURCE_URL#jdbc:postgresql://}"
+    HOST_PORT="${REST%%/*}"
+    PATH_QUERY="${REST#*/}"
+    DB_HOST="${HOST_PORT%%:*}"
+    DB_PORT_PART="${HOST_PORT##*:}"
+    DB_NAME="${PATH_QUERY%%\?*}"
+    DB_PORT="${DB_PORT_PART:-5432}"
+    [ "$DB_PORT" = "$DB_HOST" ] && DB_PORT=5432
+
+    echo "Applying V4 migration → ${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    PGPASSWORD="${DB_PASSWORD}" psql \
+      -h "${DB_HOST}" -p "${DB_PORT}" \
+      -U "${DB_USERNAME}" -d "${DB_NAME}" \
+      --set=sslmode=require \
+      -f "${MIGRATION_SQL}" \
+      && echo "V4 migration applied successfully." \
+      || echo "WARNING: V4 migration returned non-zero (may already be applied)."
+MIGRATION_V4
 else
-  info "Skipping V3 migration (--skip-migration)"
+  info "Skipping V3/V4 migrations (--skip-migration)"
 fi
 
-# ── Refresh recommendations_knn ES mapping ───────────────────────────────────
-step "Refresh Elasticsearch recommendations_knn index (1408-dim)"
+# ── Refresh Elasticsearch indices (1408-dim dense vectors where applicable) ─
+step "Refresh Elasticsearch indices (recommendations_knn, face_search, known_faces_index)"
 ssh "${SSH_HOST}" "bash -s" << 'ESREFRESH'
   source ~/Kaleidoscope/kaleidoscope-ai/.env 2>/dev/null || true
   ES_PASS="${ELASTICSEARCH_PASSWORD:-}"
@@ -148,7 +178,7 @@ ssh "${SSH_HOST}" "bash -s" << 'ESREFRESH'
 
   BASE="http://localhost:9200"
   AUTH="elastic:${ES_PASS}"
-  MAPPING=~/Kaleidoscope/kaleidoscope-ai/es_mappings/recommendations_knn.json
+  MAP_DIR=~/Kaleidoscope/kaleidoscope-ai/es_mappings
 
   # ES may still be starting — retry up to 5 times
   for i in 1 2 3 4 5; do
@@ -158,13 +188,20 @@ ssh "${SSH_HOST}" "bash -s" << 'ESREFRESH'
     sleep 10
   done
 
-  echo "Deleting old recommendations_knn index (404 is OK)..."
-  curl -s -o /dev/null -w "HTTP %{http_code}\n" -u "$AUTH" -X DELETE "$BASE/recommendations_knn" || true
-  echo "Creating recommendations_knn with 1408-dim mapping..."
-  RESULT=$(curl -sf -u "$AUTH" -X PUT "$BASE/recommendations_knn" \
-    -H "Content-Type: application/json" \
-    -d "@$MAPPING" 2>&1)
-  echo "$RESULT"
+  refresh_index() {
+    IDX="$1"
+    FILE="$2"
+    echo "Deleting ${IDX} (404 OK)..."
+    curl -s -o /dev/null -w "HTTP %{http_code}\n" -u "$AUTH" -X DELETE "$BASE/${IDX}" || true
+    echo "Creating ${IDX}..."
+    curl -sf -u "$AUTH" -X PUT "$BASE/${IDX}" \
+      -H "Content-Type: application/json" \
+      -d "@$FILE" && echo "  ${IDX} OK" || echo "  WARNING: failed to create ${IDX}"
+  }
+
+  refresh_index "recommendations_knn" "$MAP_DIR/recommendations_knn.json"
+  refresh_index "face_search" "$MAP_DIR/face_search.json"
+  refresh_index "known_faces_index" "$MAP_DIR/known_faces_index.json"
 ESREFRESH
 
 # ── Pull latest images ───────────────────────────────────────────────────────

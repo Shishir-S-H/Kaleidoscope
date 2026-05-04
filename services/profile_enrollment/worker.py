@@ -2,8 +2,8 @@
 
 Consumes events from ``profile-picture-processing`` (published by the Java
 backend when a user uploads or changes their profile picture). Downloads the
-image, extracts a face embedding via HFFaceProvider, and publishes the
-embedding payload to ``user-profile-face-embedding-results`` so the Java
+image, extracts a face embedding via the configured face provider (Google or HF),
+and publishes the embedding payload to ``user-profile-face-embedding-results`` so the Java
 UserProfileFaceEmbeddingConsumer can update its read model.
 
 Stream routing fixed (GAP-2): was es-sync-queue (bypassed Java entirely),

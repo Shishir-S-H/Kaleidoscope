@@ -53,19 +53,19 @@ sequenceDiagram
     PE->>CDN: GET imageUrl (download image bytes)
     CDN-->>PE: image bytes
     PE->>HF: Face detection + embedding extraction
-    HF-->>PE: { faces: [{ embedding[1024], confidence }] }
+    HF-->>PE: { faces: [{ embedding[1408], confidence }] }
 
     alt No face detected
         PE->>PE: Log warning, XACK, skip enrollment
     else Face detected
-        PE->>REDIS: XADD user-profile-face-embedding-results<br/>{ userId, faceEmbedding[1024], correlationId }
+        PE->>REDIS: XADD user-profile-face-embedding-results<br/>{ userId, faceEmbedding[1408], correlationId }
         PE->>REDIS: XACK profile-picture-processing
         REDIS->>BE: XREADGROUP UserProfileFaceEmbeddingConsumer
         BE->>PG: UPDATE read_model_known_faces SET face_embedding = ?
         BE->>REDIS: XADD es-sync-queue<br/>{ indexType: "known_faces_index", documentId: userId, operation: "index" }
         REDIS->>BE: es_sync reads from PostgreSQL
         Note over BE,ES: es_sync worker queries PG read model
-        BE->>ES: PUT /known_faces_index/_doc/{userId}<br/>{ user_id, username, face_embedding[1024], is_active: true }
+        BE->>ES: PUT /known_faces_index/_doc/{userId}<br/>{ user_id, username, face_embedding[1408], is_active: true }
         ES-->>BE: 201 indexed
     end
 
@@ -165,7 +165,7 @@ sequenceDiagram
     and face_recognition
         REDIS->>FR: XREADGROUP face-recognition-group
         FR->>HF: Face detection + embedding extraction
-        HF-->>FR: { faces[{ faceId, bbox, embedding[1024], confidence }] }
+        HF-->>FR: { faces[{ faceId, bbox, embedding[1408], confidence }] }
         FR->>REDIS: XADD face-detection-results<br/>{ mediaId, postId, facesDetected, faces[], correlationId }
         FR->>REDIS: XACK post-image-processing
     end
@@ -294,7 +294,7 @@ sequenceDiagram
 | Post-level search | `post_search` | `multi_match` on title, caption, tags | `inferred_event_type` match |
 | User discovery | `user_search` | `multi_match` on username, department | — |
 | Face search | `face_search` | `term` on `detected_user_ids` | — |
-| Face KNN | `known_faces_index` | `knn` on `face_embedding` (cosine, 1024-dim) | `is_active: true` filter |
+| Face KNN | `known_faces_index` | `knn` on `face_embedding` (cosine, 1408-dim) | `is_active: true` filter |
 | Recommendations | `recommendations_knn` | `knn` on `content_embedding` | User affinity vector |
 
 ### Data Flow That Enables Search

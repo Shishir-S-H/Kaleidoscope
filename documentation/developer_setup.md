@@ -96,7 +96,7 @@ HF_API_URL_IMAGE_CAPTIONING=Salesforce/blip2-opt-2.7b
 # Face: Space API only — https://huggingface.co/spaces/phantomfury/kaleidoscope-face-recognition → use hf.space URL:
 HF_API_URL_FACE_RECOGNITION=https://phantomfury-kaleidoscope-face-recognition.hf.space/detect
 HF_API_URL_IMAGE_EMBEDDING=openai/clip-vit-base-patch16
-FACE_EMBEDDING_DIM=1024
+FACE_EMBEDDING_DIM=1408
 
 # ── Security ─────────────────────────────────────────────────────────────────
 # Required — use a strong random password in production

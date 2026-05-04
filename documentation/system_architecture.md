@@ -239,16 +239,16 @@ The `es_sync` worker reads from PostgreSQL read-model tables and indexes into El
 
 | Index Name | Primary Use | Key Fields | Vector Search |
 |-----------|-------------|-----------|---------------|
-| `media_search` | Per-image semantic search | `ai_caption`, `ai_tags[]`, `ai_scenes[]`, `is_safe`, `media_url` | `image_embedding` (512-dim) |
+| `media_search` | Per-image semantic search | `ai_caption`, `ai_tags[]`, `ai_scenes[]`, `is_safe`, `media_url` | `image_embedding` (1408-dim) |
 | `post_search` | Post-level aggregated discovery | `all_ai_tags[]`, `inferred_event_type`, `combined_caption`, `total_faces` | — |
 | `user_search` | User profile discovery | `username`, `department`, `bio` | — |
-| `face_search` | Face search across posts | `detected_user_ids[]`, `bbox`, `confidence` | `face_embedding` (1024-dim) |
+| `face_search` | Face search across posts | `detected_user_ids[]`, `bbox`, `confidence` | `face_embedding` (1408-dim) |
 | `recommendations_knn` | Content-based recommendations | `post_id`, `tags`, `scenes` | `content_embedding` (KNN) |
 | `feed_personalized` | Personalised feed ranking | `affinity_score`, `recency_score`, `user_id` | — |
-| `known_faces_index` | Face enrollment / identification | `user_id`, `username`, `department`, `profile_pic_url`, `is_active` | `face_embedding` (1024-dim, cosine) |
+| `known_faces_index` | Face enrollment / identification | `user_id`, `username`, `department`, `profile_pic_url`, `is_active` | `face_embedding` (1408-dim, cosine) |
 
 **`known_faces_index` mapping highlights:**  
-- `face_embedding`: `dense_vector`, `dims: 1024`, `similarity: cosine`, indexed for KNN  
+- `face_embedding`: `dense_vector`, `dims: 1408`, `similarity: cosine`, indexed for KNN  
 - `is_active`: boolean filter applied at query time to exclude deactivated profiles
 
 **Elasticsearch index domain ownership** — write authority is split between layers:
@@ -420,5 +420,5 @@ A chronological record of how the `kaleidoscope-ai` layer was assembled. Useful 
 
 - Built `services/federated_aggregator/worker.py`: averages gradient payloads from edge nodes (`federated-gradient-updates`) and publishes global model state to `global-model-state`.
 - Built the face auto-tagging pipeline:
-  - `profile_enrollment`: extracts 1024-dim face embeddings from profile pictures and routes them to Java via `user-profile-face-embedding-results` (GAP-2 fix — was incorrectly publishing to `es-sync-queue`).
+  - `profile_enrollment`: extracts 1408-dim face embeddings from profile pictures (Vertex multimodal, same as post face crops) and routes them to Java via `user-profile-face-embedding-results` (GAP-2 fix — was incorrectly publishing to `es-sync-queue`).
   - `face_matcher`: runs KNN searches against `known_faces_index` in Elasticsearch for each detected face and publishes matches to `face-recognition-results` (GAP-1/GAP-3 fix — was publishing to the non-existent `face-tag-suggestions` stream).

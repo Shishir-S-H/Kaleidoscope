@@ -1,28 +1,18 @@
-name: Build, Push & Deploy
+name: Build & Push AI Images
+
+# Builds every AI worker image and pushes to Docker Hub. Does NOT SSH into production.
+# After this workflow succeeds, deploy manually on the droplet (see documentation/handoff_teammate_java_kaleidoscope_repo.md).
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      skip_deploy:
-        description: "Skip SSH deployment (build+push only)"
-        required: false
-        default: "false"
-      drain_dlq:
-        description: "Enable DLQ auto-retry after deploy to replay stranded messages"
-        required: false
-        default: "false"
 
-# Cancel any in-progress run on the same branch so we never deploy a stale image.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: kaleidoscope-ai-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 1 — Build & push every AI service image in parallel
-  # ─────────────────────────────────────────────────────────────────────────────
   build-and-push:
     name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -82,193 +72,29 @@ jobs:
           echo "Pushed: ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:latest"
           echo "SHA tag: ${{ secrets.DOCKER_USERNAME }}/kaleidoscope-${{ matrix.service }}:${{ github.sha }}"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 2 — SSH deploy to DigitalOcean droplet
-  # Waits for ALL build-and-push matrix jobs to succeed before proceeding.
-  # ─────────────────────────────────────────────────────────────────────────────
-  deploy:
-    name: Deploy to DigitalOcean
+  post-build:
+    name: Manual deploy reminder
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: >
-      github.ref == 'refs/heads/main' &&
-      github.event.inputs.skip_deploy != 'true'
-    environment: production
+    if: success()
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # ── Install SSH key ──────────────────────────────────────────────────────
-      - name: Configure SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
-
-      - name: Add server to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H 165.232.179.167 >> ~/.ssh/known_hosts
-
-      # ── Validate required env secrets are set ────────────────────────────────
-      - name: Verify required secrets
-        run: |
-          MISSING=""
-          [ -z "${{ secrets.GOOGLE_CLOUD_PROJECT }}" ]      && MISSING="$MISSING GOOGLE_CLOUD_PROJECT"
-          [ -z "${{ secrets.GOOGLE_CREDENTIALS_BASE64 }}" ] && MISSING="$MISSING GOOGLE_CREDENTIALS_BASE64"
-          [ -z "${{ secrets.SPRING_DATASOURCE_URL }}" ]     && MISSING="$MISSING SPRING_DATASOURCE_URL"
-          [ -z "${{ secrets.DB_USERNAME }}" ]                && MISSING="$MISSING DB_USERNAME"
-          [ -z "${{ secrets.DB_PASSWORD }}" ]                && MISSING="$MISSING DB_PASSWORD"
-          if [ -n "$MISSING" ]; then
-            echo "ERROR: The following GitHub secrets are not set:$MISSING"
-            echo "Add them at: Settings → Secrets and variables → Actions"
-            exit 1
-          fi
-          echo "All required secrets present."
-
-      # ── Sync compose file + migrations to the server ────────────────────────
-      - name: Sync repo to server
-        run: |
-          ssh root@165.232.179.167 "
-            cd ~/Kaleidoscope && git fetch origin main && git reset --hard origin/main
-          "
-
-      # ── Apply V3 DB migration (idempotent — DROP IF EXISTS + ADD) ───────────
-      - name: Apply V3 vector-dimension migration
-        run: |
-          ssh root@165.232.179.167 "
-            set -e
-            MIGRATION_FILE=~/Kaleidoscope/kaleidoscope-ai/migrations/V3__upgrade_vector_dimensions.sql
-            if [ ! -f \"\$MIGRATION_FILE\" ]; then
-              echo 'V3 migration file not found — skipping'
-              exit 0
-            fi
-
-            # Read DB connection params from .env
-            source ~/Kaleidoscope/kaleidoscope-ai/.env 2>/dev/null || true
-            if [ -z \"\$SPRING_DATASOURCE_URL\" ]; then
-              echo 'SPRING_DATASOURCE_URL not set — skipping migration'
-              exit 0
-            fi
-
-            # Extract host, port, dbname from JDBC URL
-            DB_HOST=\$(echo \"\$SPRING_DATASOURCE_URL\" | sed 's|jdbc:postgresql://||' | cut -d/ -f1 | cut -d: -f1)
-            DB_PORT=\$(echo \"\$SPRING_DATASOURCE_URL\" | sed 's|jdbc:postgresql://||' | cut -d/ -f1 | cut -d: -f2)
-            DB_NAME=\$(echo \"\$SPRING_DATASOURCE_URL\" | sed 's|jdbc:postgresql://[^/]*/||' | cut -d? -f1)
-            DB_PORT=\${DB_PORT:-5432}
-
-            echo \"Running V3 migration against \$DB_HOST:\$DB_PORT/\$DB_NAME ...\"
-            PGPASSWORD=\"\$DB_PASSWORD\" psql \
-              -h \"\$DB_HOST\" -p \"\$DB_PORT\" -U \"\$DB_USERNAME\" -d \"\$DB_NAME\" \
-              --set=sslmode=require \
-              -f \"\$MIGRATION_FILE\" && echo 'V3 migration applied.' || echo 'V3 migration failed (may already be applied).'
-          "
-
-      # ── Pull latest images ───────────────────────────────────────────────────
-      - name: Pull latest Docker images
-        run: |
-          ssh root@165.232.179.167 "
-            cd ~/Kaleidoscope/kaleidoscope-ai
-            docker compose -f docker-compose.prod.yml pull
-          "
-
-      # ── Refresh Elasticsearch recommendations_knn mapping (1408-dim) ────────
-      - name: Refresh recommendations_knn ES index
-        run: |
-          ssh root@165.232.179.167 "
-            source ~/Kaleidoscope/kaleidoscope-ai/.env 2>/dev/null || true
-            ES_PASS=\"\${ELASTICSEARCH_PASSWORD:-}\"
-            if [ -z \"\$ES_PASS\" ]; then
-              echo 'ELASTICSEARCH_PASSWORD not set — skipping ES index refresh'
-              exit 0
-            fi
-            echo 'Deleting old recommendations_knn index (ignore 404)...'
-            curl -s -o /dev/null -w '%{http_code}' \
-              -u \"elastic:\$ES_PASS\" \
-              -X DELETE http://localhost:9200/recommendations_knn || true
-            echo ''
-            echo 'Recreating recommendations_knn with 1408-dim mapping...'
-            curl -sf \
-              -u \"elastic:\$ES_PASS\" \
-              -X PUT http://localhost:9200/recommendations_knn \
-              -H 'Content-Type: application/json' \
-              -d @~/Kaleidoscope/kaleidoscope-ai/es_mappings/recommendations_knn.json \
-              && echo 'recommendations_knn index created.' \
-              || echo 'WARNING: Failed to create recommendations_knn — ES may not be running yet.'
-          "
-
-      # ── Stop → start services ────────────────────────────────────────────────
-      - name: Restart all services
-        run: |
-          ssh root@165.232.179.167 "
-            cd ~/Kaleidoscope/kaleidoscope-ai
-            docker compose -f docker-compose.prod.yml down --remove-orphans
-            docker compose -f docker-compose.prod.yml up -d
-          "
-
-      # ── Wait for containers to become healthy ────────────────────────────────
-      - name: Wait for services to stabilise
-        run: sleep 30
-
-      # ── Health checks ────────────────────────────────────────────────────────
-      - name: Health checks
-        run: |
-          ssh root@165.232.179.167 "
-            source ~/Kaleidoscope/kaleidoscope-ai/.env 2>/dev/null || true
-
-            echo '=== Container status ==='
-            docker compose -f ~/Kaleidoscope/kaleidoscope-ai/docker-compose.prod.yml ps
-
-            echo ''
-            echo '=== Redis ping ==='
-            docker exec redis redis-cli -a \"\${REDIS_PASSWORD:-}\" ping 2>/dev/null || echo 'Redis not ready'
-
-            echo ''
-            echo '=== Elasticsearch cluster health ==='
-            curl -sf -u \"elastic:\${ELASTICSEARCH_PASSWORD:-}\" \
-              http://localhost:9200/_cluster/health?pretty 2>/dev/null || echo 'ES not ready'
-
-            echo ''
-            echo '=== AI worker health endpoints ==='
-            for svc in image_tagger image_captioning scene_recognition image_embedding \
-                       content_moderation face_recognition post_aggregator es_sync dlq_processor; do
-              PORT=\$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \"\$svc\" 2>/dev/null)
-              STATUS=\$(docker inspect --format='{{.State.Status}}' \"\$svc\" 2>/dev/null || echo 'missing')
-              echo \"  \$svc: \$STATUS\"
-            done
-          "
-
-      # ── Optional: drain DLQ backlog ──────────────────────────────────────────
-      - name: Drain DLQ backlog (if requested)
-        if: github.event.inputs.drain_dlq == 'true'
-        run: |
-          ssh root@165.232.179.167 "
-            cd ~/Kaleidoscope/kaleidoscope-ai
-            echo 'Enabling DLQ auto-retry for backlog drain...'
-            docker compose -f docker-compose.prod.yml stop dlq_processor
-            DLQ_AUTO_RETRY=true docker compose -f docker-compose.prod.yml up -d dlq_processor
-            echo 'DLQ processor restarted with auto-retry=true'
-            echo 'Waiting 60s for DLQ drain...'
-            sleep 60
-            echo 'Disabling DLQ auto-retry...'
-            docker compose -f docker-compose.prod.yml stop dlq_processor
-            docker compose -f docker-compose.prod.yml up -d dlq_processor
-            echo 'DLQ processor restarted with auto-retry=false (default)'
-          "
-
-      # ── Deployment summary ───────────────────────────────────────────────────
-      - name: Deployment summary
+      - name: Print next steps for production
         run: |
           echo "============================================"
-          echo "  Deployment complete"
+          echo "  All AI images built and pushed"
           echo "  Commit : ${{ github.sha }}"
           echo "  Branch : ${{ github.ref_name }}"
-          echo "  Host   : 165.232.179.167"
-          echo "  Images : shishir01/kaleidoscope-*:latest"
           echo "============================================"
           echo ""
-          echo "To verify a specific post, SSH and run:"
-          echo "  python3 ~/Kaleidoscope/kaleidoscope-ai/scripts/deployment/verify_post_pipeline.py test-2"
+          echo "CI no longer deploys over SSH. On the droplet, run:"
+          echo "  1) cd ~/Kaleidoscope && git pull origin main   # or your deploy branch"
+          echo "  2) cd kaleidoscope-ai && git pull origin main  # if kaleidoscope-ai is a submodule/path"
+          echo "  3) Apply DB migrations if needed (V4 face vectors):"
+          echo "       psql ... -f migrations/V4__face_embeddings_vector_1408.sql"
+          echo "  4) Recreate ES indices (face_search, known_faces_index, recommendations_knn)"
+          echo "       or run: ./scripts/deployment/deploy-production.sh --skip-migration"
+          echo "       after migrations, to refresh indices + docker compose pull + up"
+          echo "  5) docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d"
           echo ""
-          echo "To watch live logs:"
-          echo "  ssh root@165.232.179.167 'docker compose -f ~/Kaleidoscope/kaleidoscope-ai/docker-compose.prod.yml logs -f --tail=100'"
+          echo "See: documentation/handoff_teammate_java_kaleidoscope_repo.md"

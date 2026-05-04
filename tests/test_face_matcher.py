@@ -14,8 +14,8 @@ VALID_EVENT = {
     "postId": "55",
     "facesDetected": "2",
     "faces": json.dumps([
-        {"faceId": "face-a", "embedding": [0.1] * 1024, "confidence": 0.97},
-        {"faceId": "face-b", "embedding": [0.2] * 1024, "confidence": 0.88},
+        {"faceId": "face-a", "embedding": [0.1] * 1408, "confidence": 0.97},
+        {"faceId": "face-b", "embedding": [0.2] * 1408, "confidence": 0.88},
     ]),
     "correlationId": "corr-match-1",
     "timestamp": "2026-01-01T00:00:00Z",

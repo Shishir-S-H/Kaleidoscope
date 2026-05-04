@@ -5,37 +5,33 @@ to the DigitalOcean droplet at `165.232.179.167`.
 
 ---
 
-## CI/CD — Automated Flow (Recommended)
+## CI/CD — GitHub Actions (build & push only)
 
-Every push to `main` triggers the GitHub Actions workflow at
-`.github/workflows/build-and-push.yml`, which:
+Every push to `main` triggers `.github/workflows/build-and-push.yml`, which:
 
-1. **Builds** all 13 AI service Docker images in parallel
-2. **Pushes** each image as `shishir01/kaleidoscope-{service}:latest` and `:{sha}`
-3. **Deploys** automatically to the DigitalOcean droplet via SSH
+1. **Builds** all AI service Docker images in parallel  
+2. **Pushes** each image as `{DOCKER_USERNAME}/kaleidoscope-{service}:latest` and `:{sha}`  
 
-### Required GitHub Secrets
+**The workflow does not SSH into production.** After it turns green, deploy on the droplet: pull git, run DB migrations if needed, recreate Elasticsearch indices (see `documentation/handoff_teammate_java_kaleidoscope_repo.md`), then `docker compose pull && up`.
 
-Add these at **Settings → Secrets and variables → Actions**:
+### Required GitHub Secrets (build job only)
 
 | Secret | Description |
 |--------|-------------|
-| `DOCKER_USERNAME` | Docker Hub username (`shishir01`) |
-| `DOCKER_PASSWORD` | Docker Hub password / access token |
-| `DO_SSH_PRIVATE_KEY` | Private SSH key with access to root@165.232.179.167 |
-| `GOOGLE_CLOUD_PROJECT` | GCP project ID (`kaleidoscope-backend`) |
-| `GOOGLE_CREDENTIALS_BASE64` | Base64-encoded service account JSON |
-| `SPRING_DATASOURCE_URL` | Neon PostgreSQL JDBC URL |
-| `DB_USERNAME` | Database username |
-| `DB_PASSWORD` | Database password |
+| `DOCKER_USERNAME` | Docker Hub username |
+| `DOCKER_PASSWORD` | Docker Hub access token |
+
+Optional: remove unused secrets (`DO_SSH_PRIVATE_KEY`, `SPRING_DATASOURCE_URL`, etc.) from Actions if you no longer run the old deploy job from CI.
 
 ### Manual workflow triggers
 
-The workflow supports `workflow_dispatch` with two options:
+`workflow_dispatch` runs the same build-and-push (no extra inputs).
 
-- **skip_deploy** — build and push images only, skip SSH deployment
-- **drain_dlq** — after deploy, restart `dlq_processor` with `DLQ_AUTO_RETRY=true`
-  for 60 seconds to replay stranded DLQ messages, then disable
+---
+
+## Manual production deploy (SSH)
+
+Use `deploy-production.sh` from a machine with SSH access, or run the equivalent steps on the server. That path still needs server `.env` (Google, DB, Redis, ES passwords) and optionally `DO_SSH_PRIVATE_KEY` only on **your** laptop/CI that invokes the script.
 
 ---
 
@@ -52,19 +48,20 @@ Runs the entire deploy sequence locally (SSH to the droplet).
 # Deploy + replay any stranded DLQ messages
 ./scripts/deployment/deploy-production.sh --drain-dlq
 
-# Deploy without re-running the V3 SQL migration
+# Deploy without re-running V3/V4 SQL migrations
 ./scripts/deployment/deploy-production.sh --skip-migration
 ```
 
 What it does:
 1. Syncs the repo on the server (`git pull`)
 2. Validates `.env` variables (warns on wrong Gemini model ID)
-3. Applies V3 SQL migration (VECTOR 512→1408 for embeddings)
-4. Refreshes the `recommendations_knn` Elasticsearch index to 1408 dims
-5. Pulls all latest Docker images
-6. Stops → starts all services
-7. Waits 30 s then runs health checks (Redis, ES, backend, AI workers)
-8. Optionally drains the DLQ backlog (`--drain-dlq`)
+3. Applies **V3** SQL migration (image `VECTOR` 512→1408 where applicable)
+4. Applies **V4** SQL migration (face tables `VECTOR` 1024→1408; **deletes** existing face rows)
+5. Recreates Elasticsearch indices **`recommendations_knn`**, **`face_search`**, **`known_faces_index`** from `es_mappings/*.json` (documents are dropped — rely on `es_sync` / backend to repopulate)
+6. Pulls all latest Docker images
+7. Stops → starts all services
+8. Waits 30 s then runs health checks (Redis, ES, backend, AI workers)
+9. Optionally drains the DLQ backlog (`--drain-dlq`)
 
 ### `verify_google_apis.py` — Post-deploy verification
 
@@ -86,7 +83,7 @@ Checks:
 - Vertex AI Embedding model returns a 1408-dim vector
 - Elasticsearch is green/yellow and all expected indices exist
 - Redis is reachable; reports DLQ depth
-- PostgreSQL is reachable; V3 migration columns exist
+- PostgreSQL is reachable; V3 image-embedding columns + **V4 face-vector columns** (expected `vector(1408)`)
 
 ### `verify_post_pipeline.py` — End-to-end pipeline audit
 

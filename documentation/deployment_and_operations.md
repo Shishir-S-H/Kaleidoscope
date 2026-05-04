@@ -407,11 +407,13 @@ docker system df  # Docker-specific disk usage
 
 ### After GitHub Actions CI/CD builds new images
 
-CI/CD (`.github/workflows/build-and-push.yml`) automatically builds and pushes Docker images to Docker Hub on every push to `main`. Once the workflow completes:
+CI/CD (`.github/workflows/build-and-push.yml`) **builds and pushes** Docker images to Docker Hub on every push to `main`. It does **not** SSH into the droplet. Once the workflow completes, deploy from a machine with SSH access:
 
 ```bash
 ./scripts/deployment/deploy-production.sh
 ```
+
+That script syncs git on the server, applies **V3/V4** migrations when not skipped, recreates **`recommendations_knn`**, **`face_search`**, and **`known_faces_index`** in Elasticsearch, pulls images, and restarts compose. See `documentation/handoff_teammate_java_kaleidoscope_repo.md` for a full checklist.
 
 ### Rolling update of a single service
 

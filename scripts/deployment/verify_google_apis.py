@@ -361,7 +361,7 @@ def check_postgresql() -> bool:
         cur = conn.cursor()
         ok("PostgreSQL connection established")
 
-        # Check V3 migration: both columns should now be VECTOR(1408)
+        # Check V3 migration: image_embedding columns VECTOR(1408)
         cur.execute("""
             SELECT table_name, column_name, udt_name
             FROM information_schema.columns
@@ -376,6 +376,24 @@ def check_postgresql() -> bool:
                 ok(f"{tbl}.image_embedding column exists (type={rows[key]})")
             else:
                 warn(f"{tbl}.image_embedding column missing — run V3 migration")
+
+        # V4: face embedding columns should be vector(1408) for Vertex multimodal embeddings
+        cur.execute("""
+            SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod) AS typ
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public'
+              AND c.relname IN ('media_detected_faces', 'read_model_face_search', 'read_model_known_faces')
+              AND a.attnum > 0 AND NOT a.attisdropped
+              AND a.attname IN ('embedding', 'face_embedding')
+            ORDER BY c.relname, a.attname
+        """)
+        for rel, att, typ in cur.fetchall():
+            if "1408" in typ:
+                ok(f"{rel}.{att}: {typ}")
+            else:
+                warn(f"{rel}.{att}: {typ} — expected vector(1408); run V4 migration if still 1024")
 
         # Quick sanity: confirm pgvector extension
         cur.execute("SELECT extname, extversion FROM pg_extension WHERE extname='vector'")

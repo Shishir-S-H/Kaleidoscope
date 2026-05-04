@@ -18,7 +18,7 @@ VALID_EVENT = {
 def _make_face(embedding=None, confidence=0.95):
     face = MagicMock()
     face.confidence = confidence
-    face.embedding = embedding or [0.1] * 1024
+    face.embedding = embedding or [0.1] * 1408
     face.face_id = "face-uuid-1"
     return face
 
@@ -76,7 +76,7 @@ class TestProfileEnrollmentHappyPath:
 
         payload = publisher.publish.call_args[0][1]
         embedding = json.loads(payload["faceEmbedding"])
-        assert len(embedding) == 1024
+        assert len(embedding) == 1408
 
     def test_payload_contains_correlation_id(self, publisher, mock_provider, mock_image_bytes):
         with patch("services.profile_enrollment.worker.get_provider", return_value=mock_provider), \
@@ -87,8 +87,8 @@ class TestProfileEnrollmentHappyPath:
         assert publisher.publish.call_args[0][1]["correlationId"] == "corr-enroll-1"
 
     def test_selects_highest_confidence_face(self, publisher, mock_image_bytes):
-        low = _make_face(embedding=[0.2] * 1024, confidence=0.6)
-        high = _make_face(embedding=[0.9] * 1024, confidence=0.98)
+        low = _make_face(embedding=[0.2] * 1408, confidence=0.6)
+        high = _make_face(embedding=[0.9] * 1408, confidence=0.98)
         provider = MagicMock()
         provider.detect.return_value = _make_result(faces=[low, high])
 
