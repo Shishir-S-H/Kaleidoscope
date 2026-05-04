@@ -1,152 +1,103 @@
-# Handoff: kaleidoscope-ai (done) + production steps + Java `Kaleidoscope` repo
+# Handoff: kaleidoscope-ai + production + Java `Kaleidoscope` repo
 
-This note is for a teammate after the **May 2026** changes on branch `main` of **kaleidoscope-ai**: face vectors and Elasticsearch mappings are aligned to **1408 dimensions** (Vertex AI `multimodalembedding@001`), GitHub Actions **only builds and pushes** Docker images (no automatic SSH deploy), and deploy scripts recreate the relevant ES indices.
+This note is for a teammate after the **May 2026** alignment on **1408-dimensional** face and image embeddings (Vertex AI `multimodalembedding@001`), CI that **builds/pushes only**, and production operations on the droplet.
 
 ---
 
-## Part A — What was changed in **kaleidoscope-ai** (already in repo)
+## Part A — What was changed in **kaleidoscope-ai** (`Shishir-S-H/Kaleidoscope` on GitHub)
 
 | Area | Change |
 |------|--------|
 | **Elasticsearch** | `es_mappings/face_search.json` and `es_mappings/known_faces_index.json`: `face_embedding.dims` **1024 → 1408**. |
-| **PostgreSQL** | New **`migrations/V4__face_embeddings_vector_1408.sql`**: deletes rows in `read_model_face_search`, `media_detected_faces`, `read_model_known_faces`, then alters embedding columns to **`vector(1408)`**. |
-| **Deploy script** | `scripts/deployment/deploy-production.sh`: runs **V4** after V3; recreates ES indices **`recommendations_knn`**, **`face_search`**, **`known_faces_index`** (delete + PUT from JSON). |
-| **One-off DB script** | `scripts/deployment/fix_face_vector_dim.py`: extended to **`read_model_known_faces`**; fixed wrong column name on `read_model_face_search` (`face_embedding`). |
-| **Tests** | `tests/test_face_matcher.py`, `tests/test_profile_enrollment.py`: mock vectors **1408** long. |
-| **HF provider default** | `shared/providers/huggingface/face.py`: default **`FACE_EMBEDDING_DIM=1408`** (Google path already used 1408). |
-| **`.env.example`** | Documents **`FACE_EMBEDDING_DIM=1408`**. |
-| **Verification** | `scripts/deployment/verify_google_apis.py`: PostgreSQL check includes face columns’ **`vector(1408)`** via `format_type`. |
-| **Docs** | `system_architecture.md`, `integration_contracts.md`, `user_journeys.md`, `developer_setup.md`, `scripts/deployment/README.md`: face/image dims updated to **1408** where applicable. |
-| **Profile worker** | `services/profile_enrollment/worker.py`: docstring no longer says “HF only”. |
-| **GitHub Actions** | `.github/workflows/build-and-push.yml`: **removed** SSH deploy job; workflow **builds + pushes** images only; final job prints manual deploy reminders. |
+| **PostgreSQL** | **`migrations/V4__face_embeddings_vector_1408.sql`**: deletes rows in `read_model_face_search`, `media_detected_faces`, `read_model_known_faces`, then alters embedding columns to **`vector(1408)`**. |
+| **Deploy script** | `scripts/deployment/deploy-production.sh`: runs **V4** after V3; recreates ES indices **`recommendations_knn`**, **`face_search`**, **`known_faces_index`**. |
+| **One-off DB script** | `scripts/deployment/fix_face_vector_dim.py`: includes **`read_model_known_faces`**; correct column **`face_embedding`** on `read_model_face_search`. |
+| **Tests / HF default / `.env.example`** | Face mocks **1408**; `FACE_EMBEDDING_DIM` documented. |
+| **Verification** | `scripts/deployment/verify_google_apis.py`: checks face PG columns (expect **1408**). |
+| **GitHub Actions** | `.github/workflows/build-and-push.yml`: **no SSH deploy**; build + push only. |
 
 ---
 
-## Part B — What **you** do on production (after CI is green)
+## Part B — Local **`Kaleidoscope`** Java/frontend repo (this workspace: `c:\Legion\Micorservice\Kaleidoscope`)
 
-Assume droplet **`root@165.232.179.167`** and repo layout **`~/Kaleidoscope`** (adjust if your server uses `~/Kaleidoscope` as the kaleidoscope-ai root only).
+**Remote:** `origin` → `https://github.com/nrashmi06/Kaleidoscope.git` (may differ from production’s `Shishir-S-H/Kaleidoscope` fork — reconcile branches before pushing).
 
-### B1. Wait for GitHub Actions
+### B1. Git state (May 4, 2026)
 
-1. Open the repo on GitHub → **Actions** → wait for **“Build & Push AI Images”** to finish successfully for the commit you care about.
+- **`git pull` / merge completed:** `main` was merged with **`origin/main`** including **PR #104 / #105** (article UI / bug fixes) while retaining local commits **`3b71c80`** (recommendations_knn ES guard) and **`2bc701d`** (face pipeline / `MediaAiInsights` concurrency). Merge commit: **`aea0afb`**.
+- **Stash removed:** `stash@{0}` was **dropped** (not applied). It contained a large **README** rewrite, **docker-compose** tweaks, and small edits to **`MediaAiInsightsConsumer`** / **`ReadModelUpdateService`**. That work was **superseded** by the merge and by the newer **`kaleidoscope-ai`** pipeline; nothing from the stash was merged into the handoff as required code — only noted here for archaeology.
 
-### B2. Pull latest **kaleidoscope-ai** on the server
+### B2. Java changes still required (confirmed on merged `main`)
 
-```bash
-ssh root@165.232.179.167
-# If monorepo with nested kaleidoscope-ai:
-cd ~/Kaleidoscope && git fetch origin main && git reset --hard origin/main
-# If kaleidoscope-ai is standalone, cd to that repo instead and pull main.
-```
+These files still assume **1024** for **face** vectors while **PostgreSQL V4** and **Python/ES** expect **1408** for face crops (Vertex multimodal). Until updated, Hibernate/ES may reject inserts or mis-map dimensions.
 
-### B3. Apply database migrations (if not already applied)
+| File | Issue |
+|------|--------|
+| `backend/src/main/java/com/kaleidoscope/backend/posts/model/MediaDetectedFace.java` | `columnDefinition = "vector(1024)"` → should be **`vector(1408)`**. |
+| `backend/src/main/java/com/kaleidoscope/backend/users/model/UserFaceEmbedding.java` | `vector(1024)` → **`vector(1408)`** (if table still used). |
+| `backend/src/main/java/com/kaleidoscope/backend/users/document/UserDocument.java` | `@Field(..., dims = 1024)` for face-related dense vector → **`1408`** if that field is used with the same embedding model. |
+| `backend/src/main/java/com/kaleidoscope/backend/users/document/UserFaceEmbeddingDocument.java` | Comment / mapping for **1024** → **1408**. |
+| `backend/src/main/java/com/kaleidoscope/backend/users/document/UserProfileDocument.java` | Comment **1024** → **1408**. |
+| `backend/src/main/java/com/kaleidoscope/backend/posts/document/MediaDetectedFaceDocument.java` | Comment **1024** → **1408**; ensure Spring Data ES mapping matches `face_search` index (**1408**). |
+| `backend/docs/ELASTICSEARCH_INTEGRATION.md` | Update **1024** references for face where applicable. |
 
-From the server (or any host with `psql` and credentials):
+**Already aligned to 1408 (image path):** `MediaAiInsights.java` (`image_embedding` `vector(1408)`), `ReadModelUpdateService` / `RecommendationsKnnReadModel` / `MediaSearchReadModel` / ES docs for **image** embeddings (see grep on `1408`).
 
-- **V3** (image embeddings 512→1408): `migrations/V3__upgrade_vector_dimensions.sql` — idempotent in most cases.  
-- **V4** (face vectors 1024→1408): **`migrations/V4__face_embeddings_vector_1408.sql`** — **destructive** for face tables (deletes all face rows before alter).
+**`FaceSearchReadModel.java`:** uses **`TEXT`** for `face_embedding` in JPA while the DB column is **pgvector** after migrations — confirm Hibernate type mapping does not fight `vector(1408)`; adjust if you see bind/parse errors.
 
-Easiest path: run the full local deploy script from a laptop with SSH keys (it runs V3, V4, ES refresh, compose):
+### B3. Hikari pool (critical for Redis burst + Neon)
 
-```bash
-./scripts/deployment/deploy-production.sh
-```
+**File:** `backend/src/main/resources/application.yml`  
+**Current:** `spring.datasource.hikari.maximum-pool-size: **2**`  
 
-To **skip** migrations if both V3 and V4 are already applied but you still want ES + compose refresh:
+This matches production incidents (**connection timed out**, `total=2, active=2`) when **`MediaAiInsightsConsumer`**, **`FaceDetectionConsumer`**, and API traffic compete. **Raise** `maximum-pool-size` (e.g. **10–20**, subject to Neon pooler limits) and tune **`minimum-idle`** / transaction boundaries on stream consumers.
 
-```bash
-./scripts/deployment/deploy-production.sh --skip-migration
-```
+### B4. Post aggregation / `read_model_post_search`
 
-Then **manually** recreate the three indices if mappings changed (same `curl` DELETE/PUT pattern as in `deploy-production.sh`).
-
-### B4. Pull new containers and restart
-
-```bash
-cd ~/Kaleidoscope/kaleidoscope-ai   # or your actual compose directory
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-### B5. Server `.env`
-
-Ensure:
-
-- `GOOGLE_EMBEDDING_MODEL=multimodalembedding@001`  
-- **`FACE_EMBEDDING_DIM=1408`** (explicit is best).  
-
-### B6. Post-deploy checks
-
-```bash
-python3 ~/Kaleidoscope/kaleidoscope-ai/scripts/deployment/verify_google_apis.py
-python3 ~/Kaleidoscope/kaleidoscope-ai/scripts/deployment/verify_post_pipeline.py "<post-title>"
-```
-
-### B7. Operational follow-ups
-
-- **Redis PEL**: If messages were stuck on `ml-insights-results` / `face-detection-results`, reclaim or retry after DB pool / dim fixes.  
-- **DLQ**: Use `deploy-production.sh --drain-dlq` or toggle `DLQ_AUTO_RETRY` per runbook.  
-- **Reindex**: Recreating **`face_search`** / **`known_faces_index`** clears ES documents; **`es_sync`** and/or backend flows must republish. Users may need to **re-upload profile photos** for `known_faces_index` rows.
+If ML completes but aggregated post search is missing, inspect **`PostAggregationTriggerService`**, **`PostInsightsEnrichedConsumer`**, and Redis PEL backlog after pool fixes. See `documentation/handoff_backend_teammate.md`.
 
 ---
 
-## Part C — **`Kaleidoscope` Java backend** repo (separate codebase; not modified here)
+## Part C — Production droplet (**`165.232.179.167`**) — May 4, 2026 operator run
 
-Send your teammate this checklist for the **Java** monorepo (often cloned as `~/Kaleidoscope` with `kaleidoscope-ai` inside or sibling — match your layout).
+**Layout:** compose file at **`/root/Kaleidoscope/docker-compose.prod.yml`** (monorepo root = kaleidoscope-ai + backend in one tree on this host).
 
-### C1. Hikari / connection pool (production stability)
+| Step | Result |
+|------|--------|
+| **`git fetch` + `reset --hard origin/main`** | Server at **`4400cc9`** (`feat(deploy): face ES/pg 1408 dims, CI build-only`). |
+| **`docker compose … pull` + `up -d`** | All services restarted successfully. |
+| **Elasticsearch** | **`recommendations_knn`**, **`face_search`**, **`known_faces_index`** deleted and recreated from **`/root/Kaleidoscope/es_mappings/*.json`** (HTTP 200 PUT). |
+| **PostgreSQL V4** | Applied via **`docker run postgres:16-alpine psql`** (host had no `psql` binary). Output included **`DELETE`/`ALTER TABLE`** on face tables — **OK**. |
+| **Logs (first ~5 min after restart)** | **`kaleidoscope-backend`**: startup sync **26 posts**, **7 users**, **19 blogs**, **0 errors**; Redis stream listeners started. **`es_sync`**, **`face_matcher`**, **`face_recognition`**, **`dlq_processor`**, **`post_aggregator`**: healthy startup lines; **no ERROR/Exception** lines in sampled tail. |
 
-Symptoms: `KaleidoscopeHikariCP - Connection is not available, request timed out` with **`total=2`** while Redis consumers run in parallel.
+**Follow-ups on prod:** empty **`face_search`** / **`known_faces_index`** / **`recommendations_knn`** until **`es_sync`** and backend republish; users may need **profile re-enrollment** for known faces. Watch **`docker logs kaleidoscope-backend`** for Hibernate **dimension** or **SQL** errors on first new face write after V4.
 
-**Suggested changes** (Spring Boot):
-
-- Increase **`spring.datasource.hikari.maximum-pool-size`** (e.g. 10–20; tune against Neon pooler limits).  
-- Review **`minimum-idle`**, **`connection-timeout`**, and transaction scope on **`MediaAiInsightsConsumer`**, **`FaceDetectionConsumer`**, and other stream consumers so connections are not held for tens of seconds under burst.
-
-Set via **`application-prod.yml`** or environment variables exposed on the **`app`** service in compose (if you add `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` or equivalent supported property).
-
-### C2. Face and image embedding dimensions (1408)
-
-- Any Java code that **validates**, **truncates**, or assumes **1024** or **512** for **face** or **image** embeddings must use **1408** for the Vertex multimodal model path.  
-- **`read_model_known_faces`**, **`media_detected_faces`**, **`read_model_face_search`**: entity / JDBC types must accept **`vector(1408)`** (or `float[]` length 1408) after V4 runs.  
-- Elasticsearch **Java-owned** documents: if any code builds KNN queries against indices that now store **1408** dims, query vectors must match.
-
-### C3. Post aggregation / `read_model_post_search`
-
-If posts complete ML but **aggregation** or **`post_search`** ES docs are missing, verify:
-
-- **`PostAggregationTriggerService`** / **`PostInsightsConsumer`** paths after ML completion.  
-- Redis consumer errors (same pool exhaustion can skip aggregation).  
-- Optional **retrigger** tooling/scripts your team uses for `post-aggregation-trigger`.
-
-### C4. Sync Java repo on server
-
-```bash
-cd ~/Kaleidoscope   # Java repo root, if applicable
-git pull origin main
-# Rebuild/restart backend image if you build on CI: docker pull … && compose up app
-```
-
-### C5. References in this repo
-
-- `documentation/java_backend_handoff_google_migration.md` — image 512→1408, Vision faces, enrollment.  
-- `documentation/handoff_backend_teammate.md` — prior backend patches / PEL notes.
+**Re-run V4 + ES refresh without full deploy:** use `scripts/deployment/deploy-production.sh` or the **`docker run … psql`** + **`curl` DELETE/PUT** pattern from that script. On hosts **without `psql`**, use the **`postgres:16-alpine`** one-off container with **`-v /root/Kaleidoscope/migrations:/mig:ro`**.
 
 ---
 
-## Part D — GitHub repository settings reminder
+## Part D — What **you** do next (checklist)
 
-- Actions secrets: **only `DOCKER_USERNAME` + `DOCKER_PASSWORD`** are required for the new workflow.  
-- You may **delete** obsolete secrets used only by the old deploy job (`DO_SSH_PRIVATE_KEY`, `SPRING_DATASOURCE_URL`, `DB_*`, `GOOGLE_*` on GitHub) **unless** another workflow still needs them.
+1. **kaleidoscope-ai:** wait for **Actions** “Build & Push AI Images”; on server **`git pull`**; **`docker compose pull && up -d`**.  
+2. **Java `Kaleidoscope`:** implement **Part B2** + **B3**, run tests, build **`backend-latest`**, deploy backend image.  
+3. **Verify:** `verify_google_apis.py`, `verify_post_pipeline.py`, and a **new post with faces**.  
+4. **Forks:** align **`nrashmi06/Kaleidoscope`** vs **`Shishir-S-H/Kaleidoscope`** so `main` does not diverge unintentionally.
+
+---
+
+## Part E — GitHub Actions secrets (kaleidoscope-ai)
+
+- **Required:** `DOCKER_USERNAME`, `DOCKER_PASSWORD`.  
+- **Optional cleanup:** remove secrets only used by the **removed** SSH deploy job unless another workflow needs them.
 
 ---
 
 ## Summary
 
-| Location | Action |
-|----------|--------|
-| **kaleidoscope-ai `main`** | Merged: 1408 face mappings, V4 migration, deploy script, CI build-only, docs/tests. |
-| **Production server** | After CI: `git pull`, run migrations / `deploy-production.sh`, `docker compose pull && up`, verify scripts. |
-| **Java `Kaleidoscope` repo** | Teammate: pool size, 1408 validation, aggregation/PEL — see Part C. |
+| Location | Status / action |
+|----------|-----------------|
+| **kaleidoscope-ai** | 1408 ES + V4 + CI build-only on `main` (e.g. `4400cc9` on Shishir fork). |
+| **Prod droplet** | Pulled `4400cc9`, restarted compose, **recreated three ES indices**, **applied V4** via Docker `psql`; startup logs clean. |
+| **Local Java `Kaleidoscope`** | Merged `origin/main` → **`aea0afb`**; **stash dropped**; **still need JPA/ES 1408 + Hikari** per Part B. |
 
-Questions: reply in your team channel with logs from `verify_google_apis.py` and `docker logs kaleidoscope-backend --since 30m` after deploy.
+Send questions with **`docker logs …`** and **`verify_google_apis.py`** output after the next backend deploy.
