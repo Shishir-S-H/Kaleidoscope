@@ -132,7 +132,7 @@ def main():
         "media_ai_insights",
         """SELECT media_id, post_id, status, is_safe,
                   LEFT(caption, 200) AS caption_preview,
-                  tags, scenes, updated_at
+                  tags, scenes, services_completed, updated_at
            FROM media_ai_insights WHERE post_id = %s ORDER BY media_id""",
         (pid,),
     )
@@ -195,6 +195,48 @@ def main():
 
     cur.execute("SELECT media_id FROM post_media WHERE post_id = %s", (pid,))
     mids = [r["media_id"] for r in cur.fetchall()]
+
+    # Aggregation gate mirrors MediaAiInsightsRepository.countFullyProcessedByPostId (Java).
+    agg_required = ("moderation", "tagging", "scene_recognition", "image_captioning")
+
+    def _insights_row_for(mid: int):
+        cur.execute(
+            "SELECT services_completed FROM media_ai_insights WHERE media_id = %s", (mid,)
+        )
+        r = cur.fetchone()
+        return r["services_completed"] if r else None
+
+    print("=== Aggregation readiness (backend SQL gate) ===\n")
+    for mid in mids:
+        raw_completed = _insights_row_for(mid)
+        completed = list(raw_completed) if raw_completed is not None else []
+        has_all = bool(completed) and all(s in completed for s in agg_required)
+        missing = [s for s in agg_required if s not in completed]
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM media_detected_faces WHERE media_id = %s", (mid,)
+        )
+        n_faces = cur.fetchone()["c"]
+        print(
+            json.dumps(
+                {
+                    "media_id": mid,
+                    "aggregation_gate_services_required": list(agg_required),
+                    "services_completed": completed,
+                    "gate_satisfied_for_aggregation_trigger": bool(has_all),
+                    "missing_services_for_gate": missing,
+                    "pg_face_count": int(n_faces),
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        if not has_all:
+            print(
+                "WARNING: Backend will NOT publish post-aggregation-trigger until every medium "
+                "has all required services_completed (see MediaAiInsightsRepository.countFullyProcessedByPostId).\n"
+            )
+    print()
+
     cur.close()
     conn.close()
 
@@ -225,6 +267,19 @@ def main():
     except Exception as e:
         print(f"post_search error: {e}")
 
+    print("\n=== Elasticsearch: post_search _doc/{post_id} (aggregated post doc) ===\n")
+    try:
+        doc_post = es_req(es_pw, f"/post_search/_doc/{int(pid)}", None)
+        found = doc_post.get("found")
+        print(json.dumps({"found": found, "_id": doc_post.get("_id"), "_source": doc_post.get("_source")}, indent=2, default=str)[:12000])
+        if not found:
+            print(
+                "WARNING: No post_search document for this post_id — post_aggregator likely never ran "
+                "(check backend logs + aggregation gate + read_model_post_search).\n"
+            )
+    except Exception as e:
+        print(f"post_search _doc error: {e}")
+
     print("\n=== Elasticsearch: media_search (post_title or postId) ===\n")
     try:
         r2 = es_req(
@@ -246,6 +301,41 @@ def main():
         print(json.dumps(r2, indent=2)[:12000])
     except Exception as e:
         print(f"media_search error: {e}")
+
+    print("\n=== Elasticsearch: media_search face count vs PostgreSQL ===\n")
+    for mid in mids:
+        try:
+            ms = es_req(es_pw, f"/media_search/_doc/{int(mid)}", None)
+            src = (ms.get("_source") or {}) if ms.get("found") else {}
+            es_faces = src.get("detectedFaceCount")
+            conn2 = psycopg2.connect(**params)
+            conn2.autocommit = True
+            c2 = conn2.cursor(cursor_factory=RealDictCursor)
+            c2.execute(
+                "SELECT COUNT(*) AS c FROM media_detected_faces WHERE media_id = %s", (mid,)
+            )
+            pg_c = int(c2.fetchone()["c"])
+            c2.close()
+            conn2.close()
+            match = es_faces == pg_c if es_faces is not None else None
+            print(
+                json.dumps(
+                    {
+                        "media_id": mid,
+                        "pg_detected_face_rows": pg_c,
+                        "es_detectedFaceCount": es_faces,
+                        "counts_match": match,
+                    },
+                    indent=2,
+                )
+            )
+            if match is False:
+                print(
+                    "WARNING: media_search detectedFaceCount does not match PostgreSQL — "
+                    "backend likely did not re-index after face_detection.\n"
+                )
+        except Exception as e:
+            print(f"media_search face check media_id={mid}: {e}")
 
     for mid in mids:
         print(f"\n=== Elasticsearch: recommendations_knn _doc/{mid} ===\n")
